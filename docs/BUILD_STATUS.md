@@ -214,3 +214,21 @@ The unchanged no-progress guard still stops repeated planning without fresh evid
 Validation: 41 offline Rust tests, five launcher tests, fmt, clippy, release build
 and the 228-package license inventory passed. Provider-restricted live traces remain
 private and were not added to git or exported.
+
+## Remembered launcher credentials — 2026-09-19
+
+The macOS source launcher now stores newly entered provider keys in the login
+Keychain and reuses them. Explicit environment keys take precedence without being
+copied to Keychain. No secrets are passed through argv or written to repository,
+session, or plaintext configuration files. Direct Security framework calls use the
+legacy generic-password APIs verified against local Xcode SDK headers. Records are
+namespaced by service `s1code.credentials.v1` and provider. Access denial fails closed;
+`--no-keychain` is explicit ephemeral mode and `--forget-keys` deletes only these
+records without requests. Linux remains environment/ephemeral input. This is a
+source-launcher feature; the standalone Rust binary still reads environment keys.
+
+Eight offline launcher tests passed, including reuse, one-time storage, denied
+access and deletion scope. A uniquely named dummy credential passed real macOS
+Keychain create/read/update/delete; the dummy record was removed and absence checked.
+No real user credential was read, saved or submitted during implementation. No Rust
+code changed; the preceding Rust verification remains applicable.

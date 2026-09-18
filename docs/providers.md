@@ -211,8 +211,9 @@ From the source directory, run `python3 scripts/try_live.py check` for at most o
 Claude request and one official TypeSafe Jev request, or `python3 scripts/try_live.py task`
 for a fresh parser task capped at eight total provider requests including retries.
 The launcher builds before asking for keys, asks for explicit request-budget consent,
-then reads keys without echo in your local terminal. It does not save them or send
-them to Cargo/build scripts. A request cap is not a dollar cap. Set provider credit
+then reuses saved macOS Keychain credentials or reads missing keys without echo.
+On macOS, newly entered keys are saved under `s1code.credentials.v1` for the next run.
+Keys are never sent to Cargo/build scripts or stored in session files. A request cap is not a dollar cap. Set provider credit
 limits separately. Task sessions remain in the printed private temporary directory;
 keep Jev measurements private. These commands were prepared and tested offline;
 live provider validation remains unverified until you run them successfully.
@@ -231,3 +232,18 @@ actual generation adapter. The selected model is displayed before budget consent
 Existing sessions retain their original model. Changing the model is experimental;
 it does not establish better task success, latency or cost. The eight-request task
 cap remains unchanged and is not a dollar cap.
+
+Credential management for this source launcher:
+
+- `python3 scripts/try_live.py --forget-keys` deletes only its three provider records
+  from Keychain and exits without API calls. Use this before replacing saved keys.
+- `--no-keychain` uses environment credentials or temporary hidden input without
+  saving. Linux currently uses this nonpersistent behavior automatically.
+- Explicit environment keys take precedence and are not copied into Keychain.
+- A denied/locked Keychain produces an error; there is no plaintext file fallback.
+- macOS may ask permission for the Python interpreter to access saved records. This
+  is system credential storage, not isolation from other authorized local programs.
+
+This convenience belongs to `scripts/try_live.py`. The standalone Rust binary still
+reads provider keys from its environment; the launcher supplies only the needed keys
+to its child. Keys are absent from command arguments and build/tool environments.

@@ -47,3 +47,11 @@ native tools. The home screen sends no task until the user submits one.
 The optional official Claude Code handoff delegates the terminal itself. Its own
 client settings govern its traffic and telemetry; S1Code does not intercept them.
 S1Code does not capture that application's session or credentials.
+
+The source live launcher can remember provider keys in macOS Keychain, service
+`s1code.credentials.v1`, accounts `claude`, `typesafe`, `openrouter`. Missing keys
+entered on macOS are saved there for reuse; `--no-keychain` opts out. Use
+`python3 scripts/try_live.py --forget-keys` to delete those records. No plaintext key
+file is created. Python and the selected provider child hold credentials in memory;
+macOS access controls apply to the interpreter. The standalone binary still uses
+environment credentials. Linux launcher input remains temporary.

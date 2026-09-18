@@ -3,6 +3,7 @@
 import unittest
 from unittest.mock import patch
 import types
+from unittest.mock import Mock
 import try_live
 
 
@@ -17,9 +18,10 @@ class LauncherTests(unittest.TestCase):
                 try_live.credential('fixture', 'typesafe')
 
     def run_check(self, arguments, keys, consent):
-        with (patch.object(try_live.sys, 'argv', ['try_live.py', *arguments]),
+        with (patch.object(try_live.sys, 'argv', ['try_live.py', '--no-keychain', *arguments]),
               patch.object(try_live.sys.stdin, 'isatty', return_value=True),
               patch.object(try_live.sys.stdout, 'isatty', return_value=True),
+              patch.dict(try_live.os.environ, {}, clear=True),
               patch.object(try_live, 'prepare_checks', return_value='/fixture/live'),
               patch.object(try_live, 'base_environment', return_value={'PATH': '/fixture'}),
               patch.object(try_live.getpass, 'getpass', side_effect=keys) as prompt,
@@ -49,6 +51,33 @@ class LauncherTests(unittest.TestCase):
             calls, _ = self.run_check(arguments, ['sk-ant-api-fixture', 'apikey_fixture'], 'RUN 2')
             self.assertEqual(calls[0].kwargs['env']['S1CODE_LIVE_CLAUDE_MODEL'], model)
             self.assertNotIn('S1CODE_LIVE_CLAUDE_MODEL', calls[1].kwargs['env'])
+
+    def test_saved_keys_are_reused_without_prompt(self):
+        store = Mock()
+        store.get.return_value = 'apikey_fixture'
+        with patch.dict(try_live.os.environ, {}, clear=True), patch.object(try_live, 'credential') as prompt, patch('builtins.print'):
+            self.assertEqual(try_live.obtain_credential('fixture', 'typesafe', store), 'apikey_fixture')
+            prompt.assert_not_called()
+            store.set.assert_not_called()
+
+    def test_missing_key_saved_once_and_denied_access_does_not_fallback(self):
+        store = Mock()
+        store.get.return_value = None
+        with patch.dict(try_live.os.environ, {}, clear=True), patch.object(try_live, 'credential', return_value='apikey_fixture') as prompt, patch('builtins.print'):
+            self.assertEqual(try_live.obtain_credential('fixture', 'typesafe', store), 'apikey_fixture')
+            store.set.assert_called_once_with('typesafe', 'apikey_fixture')
+            store.get.side_effect = RuntimeError('Keychain access denied')
+            prompt.reset_mock()
+            with self.assertRaises(RuntimeError):
+                try_live.obtain_credential('fixture', 'typesafe', store)
+            prompt.assert_not_called()
+
+    def test_forget_deletes_only_app_provider_records_without_requests(self):
+        store = Mock()
+        with patch.object(try_live.sys, 'argv', ['try_live.py', '--forget-keys']), patch.object(try_live, 'Keychain', return_value=store), patch.object(try_live.subprocess, 'run') as run, patch('builtins.print'):
+            self.assertEqual(try_live.main(), 0)
+            self.assertEqual([c.args[0] for c in store.delete.call_args_list], ['claude', 'typesafe', 'openrouter'])
+            run.assert_not_called()
 
     def test_no_consent_means_no_secrets_or_requests(self):
         calls, prompts = self.run_check(['jev-check'], [], '')

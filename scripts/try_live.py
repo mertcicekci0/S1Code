@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Explicitly budgeted, hidden-input Claude/Jev checks. Never stores keys."""
+"""Explicitly budgeted, hidden-input Claude/Jev checks with macOS Keychain reuse."""
 import argparse
 import getpass
 import json
@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import warnings
+from credential_store import Keychain, PROVIDERS
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SAFE_ENV = ('PATH', 'HOME', 'CARGO_HOME', 'RUSTUP_HOME', 'TMPDIR', 'LANG', 'LC_ALL',
@@ -26,10 +27,37 @@ def credential(label, provider):
     with warnings.catch_warnings():
         warnings.simplefilter('error', getpass.GetPassWarning)
         value = getpass.getpass(label).strip()
+    return validate_credential(value, provider)
+
+
+def validate_credential(value, provider):
     if not value or any(c.isspace() for c in value) or '...' in value or '…' in value:
         raise ValueError('Empty/invalid key. No request was sent.')
     if provider == 'claude' and value.startswith('apikey_'):
         raise ValueError('That is a key ID, not its secret. Copy the secret from the provider console.')
+    if provider == 'claude' and not value.startswith('sk-ant-api'):
+        raise ValueError('Expected an Anthropic API secret; no request sent.')
+    if provider != 'claude' and value.startswith('sk-ant-'):
+        raise ValueError('Anthropic keys cannot authenticate Jev; no request sent.')
+    if provider == 'typesafe' and value.startswith('sk-or-'):
+        raise ValueError('Use the TypeSafe secret, or explicitly select OpenRouter.')
+    return value
+
+
+def obtain_credential(label, provider, store):
+    variable = {'claude': 'ANTHROPIC_API_KEY', 'typesafe': 'TYPESAFE_API_KEY', 'openrouter': 'OPENROUTER_API_KEY'}[provider]
+    if os.environ.get(variable):
+        print(f'{provider}: using environment credential (not copied to Keychain).')
+        return validate_credential(os.environ[variable].strip(), provider)
+    if store:
+        saved = store.get(provider)
+        if saved:
+            print(f'{provider}: using saved macOS Keychain credential.')
+            return validate_credential(saved, provider)
+    value = credential(label, provider)
+    if store:
+        store.set(provider, value)
+        print(f'{provider}: saved in macOS Keychain for future runs.')
     return value
 
 
@@ -56,7 +84,15 @@ def main():
     parser.add_argument('--jev-provider', choices=['typesafe', 'openrouter'], default='typesafe',
                         help='Jev credential issuer and endpoint (default: official TypeSafe)')
     parser.add_argument('--model', default='claude-opus-5', help='Claude generation model (default: claude-opus-5)')
+    parser.add_argument('--no-keychain', action='store_true', help='Use environment/temporary hidden input without saving')
+    parser.add_argument('--forget-keys', action='store_true', help='Delete only S1Code saved provider keys and exit; no API calls')
     args = parser.parse_args()
+    if args.forget_keys:
+        store = Keychain()
+        for provider in PROVIDERS:
+            store.delete(provider)
+        print('S1Code Keychain credentials deleted. No API requests sent.')
+        return 0
     jev_name, jev_env, jev_test = {
         'typesafe': ('TypeSafe / official Jev', 'TYPESAFE_API_KEY', 'jev_live_contract'),
         'openrouter': ('OpenRouter Jev', 'OPENROUTER_API_KEY', 'openrouter_live_contract'),
@@ -80,12 +116,15 @@ def main():
     if input(f'Type RUN {budget} to authorize this paid run, or press Enter to stop: ').strip() != f'RUN {budget}':
         print('Stopped. No credentials collected and no provider requests sent.')
         return 0
+    store = Keychain() if sys.platform == 'darwin' and not args.no_keychain else None
+    if store:
+        print('Credentials: macOS Keychain; missing keys are saved once. Use --forget-keys to remove.')
     anthropic = None
     if args.mode != 'jev-check':
-        anthropic = credential('Anthropic secret (hidden, not the apikey_ ID): ', 'claude')
+        anthropic = obtain_credential('Anthropic secret (hidden, not the apikey_ ID): ', 'claude', store)
         if not anthropic.startswith('sk-ant-api'):
             raise ValueError('Expected a Claude Console API secret starting sk-ant-api; no request sent.')
-    jev_secret = credential(f'{jev_name} secret (hidden, full unmasked key): ', args.jev_provider)
+    jev_secret = obtain_credential(f'{jev_name} secret (hidden, full unmasked key): ', args.jev_provider, store)
     if jev_secret.startswith('sk-ant-'):
         raise ValueError('Anthropic keys cannot authenticate Jev; no request sent.')
     if args.jev_provider == 'typesafe' and jev_secret.startswith('sk-or-'):
@@ -104,7 +143,7 @@ def main():
                 return result.returncode
         print('Requested live contracts passed. This does not establish coding success or efficiency. Keep Jev results private.')
         return 0
-    # Retain a private task/session for inspection and resume; never save the credentials.
+    # Retain a private task/session for inspection and resume; never save credentials in session files.
     directory = pathlib.Path(tempfile.mkdtemp(prefix='s1code-live-'))
     workspace = directory / 'repo'
     workspace.mkdir(mode=0o700)
@@ -112,7 +151,7 @@ def main():
         shutil.copyfile(ROOT / 'fixtures' / 'demo' / name, workspace / name)
     subprocess.run(['git', 'init', '-q', str(workspace)], env=environment, check=True)
     print(f'Private live workspace/session: {directory}')
-    print('Keys are not saved. Keep traces private; close the task view with q after it stops.')
+    print('Keys are never stored in task/session files. Keep traces private; close the task view with q after it stops.')
     run_env = dict(environment, ANTHROPIC_API_KEY=anthropic, **{jev_env: jev_secret})
     return subprocess.run([
         executable, '--home', str(directory / 'data'), 'run',
