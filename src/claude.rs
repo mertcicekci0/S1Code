@@ -72,14 +72,13 @@ fn schema() -> Value {
     let mut properties = serde_json::Map::new();
     let mut kinds = Vec::new();
     for variant in variants {
-        for (name, field) in variant["properties"].as_object().unwrap() {
-            if name == "type" {
-                kinds.push(field["enum"][0].clone());
-            } else {
-                properties
-                    .entry(name.clone())
-                    .or_insert_with(|| json!({"anyOf":[field,{"type":"null"}]}));
-            }
+        let kind = variant["properties"]["type"]["enum"][0].as_str().unwrap();
+        kinds.push(json!(kind));
+        let mut fields = variant["properties"].as_object().unwrap().clone();
+        fields.remove("type");
+        if !fields.is_empty() {
+            let required: Vec<_> = fields.keys().cloned().collect();
+            properties.insert(kind.into(),json!({"anyOf":[{"type":"object","properties":fields,"required":required,"additionalProperties":false},{"type":"null"}]}));
         }
     }
     properties.insert("type".into(), json!({"type":"string","enum":kinds}));
@@ -94,24 +93,47 @@ fn decode_proposal(text: &str) -> Result<crate::domain::Proposal> {
     if let Some(actions) = value["actions"].as_array_mut() {
         for action in actions {
             if let Some(fields) = action.as_object_mut() {
-                // Only unused, known wire fields may be null. Nested before_hash
-                // is left intact: null there means create a new file.
-                fields.retain(|name, value| {
-                    !value.is_null()
-                        || ![
-                            "query",
-                            "path",
-                            "start",
-                            "lines",
-                            "edits",
-                            "argv",
-                            "verification",
-                            "artifact",
-                            "reason",
-                            "summary",
-                        ]
-                        .contains(&name.as_str())
-                });
+                let kind = fields
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .context("Claude action type missing")?
+                    .to_owned();
+                let names = [
+                    "read",
+                    "search",
+                    "patch",
+                    "run",
+                    "rehydrate",
+                    "blocked",
+                    "finish",
+                ];
+                if names.iter().any(|name| fields.contains_key(*name)) {
+                    ensure!(
+                        fields
+                            .keys()
+                            .all(|name| name == "type" || names.contains(&name.as_str())),
+                        "unknown Claude wire argument"
+                    );
+                    let mut canonical = serde_json::Map::new();
+                    canonical.insert("type".into(), json!(kind));
+                    for name in names {
+                        if let Some(payload) = fields.get(name) {
+                            if name == kind {
+                                let payload = payload
+                                    .as_object()
+                                    .context("selected Claude action payload missing")?;
+                                ensure!(
+                                    !payload.contains_key("type"),
+                                    "nested action type forbidden"
+                                );
+                                canonical.extend(payload.clone());
+                            } else {
+                                ensure!(payload.is_null(), "multiple Claude action payloads");
+                            }
+                        }
+                    }
+                    *fields = canonical;
+                }
             }
         }
     }
@@ -292,7 +314,7 @@ impl Generator for Claude {
         deltas: mpsc::UnboundedSender<String>,
     ) -> Result<GenerationResult> {
         ensure!(!cancel.is_cancelled(), "generation cancelled");
-        let body = json!({"model":self.model,"system":format!("{INSTRUCTIONS} Wire format: each action has type plus all argument fields. Populate the fields needed by that type; use null for every unused argument field. Never substitute an argument-free action for a read, search, patch or run."),"messages":[{"role":"user","content":input.to_string()}],"stream":true,"max_tokens":8192,"output_config":{"format":{"type":"json_schema","schema":schema()}}});
+        let body = json!({"model":self.model,"system":format!("{INSTRUCTIONS} Wire format: each action has type plus named payloads read/search/patch/run/rehydrate/blocked/finish. Put arguments inside the payload matching type; all other payloads must be null. Example: type=read with read={{path:relative/path,start:1,lines:100}}. Keep explanations in the top-level message, never in another payload. Never substitute an argument-free action for a read, search, patch or run."),"messages":[{"role":"user","content":input.to_string()}],"stream":true,"max_tokens":8192,"output_config":{"format":{"type":"json_schema","schema":schema()}}});
         let response = tokio::select! {biased; _=cancel.cancelled()=>bail!("generation cancelled"), r=self.client.post(&self.endpoint).header("x-api-key", &self.key).header("anthropic-version", "2023-06-01").json(&body).send()=>r.context("Claude transport failed")?};
         if !response.status().is_success() {
             let status = response.status();
@@ -367,7 +389,7 @@ fn http_error(status: u16, body: &[u8], key: &str) -> String {
 mod error_tests {
     use super::*;
     #[test]
-    fn flat_wire_actions_recover_exact_arguments_and_reject_cross_type_fields() {
+    fn named_payload_actions_recover_exact_arguments_and_reject_cross_type_fields() {
         let wire = schema();
         let item = &wire["properties"]["actions"]["items"];
         assert!(item.get("anyOf").is_none());
@@ -378,7 +400,13 @@ mod error_tests {
             json!({"type":"run","argv":["python3","-m","unittest"],"verification":true}),
             json!({"type":"list"}),
         ] {
-            let mut padded = action.clone();
+            let mut padded = json!({"type":action["type"]});
+            let kind = action["type"].as_str().unwrap();
+            if kind != "list" {
+                let mut args = action.as_object().unwrap().clone();
+                args.remove("type");
+                padded[kind] = json!(args);
+            }
             for name in item["properties"].as_object().unwrap().keys() {
                 padded
                     .as_object_mut()
@@ -395,6 +423,9 @@ mod error_tests {
             json!({"type":"read","path":"parser.py","start":null,"lines":10}),
             json!({"type":"list","path":"parser.py"}),
             json!({"type":"list","invented":null}),
+            json!({"type":"read","read":{"path":"parser.py","start":1,"lines":40},"run":{"argv":["python3","-m","unittest"],"verification":true}}),
+            json!({"type":"read","read":{"path":"parser.py","start":1,"lines":40,"reason":"extra"}}),
+            json!({"type":"read","read":null}),
         ] {
             assert!(
                 decode_proposal(&json!({"message":"Inspect","actions":[action]}).to_string())

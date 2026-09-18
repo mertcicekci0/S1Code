@@ -2,8 +2,8 @@
 
 **Runnable experimental v0 core. Full live release acceptance is not yet established.**
 The native API integrations are implemented and tested against local HTTP fixtures,
-but billed OpenAI/Claude/Jev inference and a complete delegated coding turn have not been
-verified. No performance claim, package publication, release upload, push, or hosted
+with provider-restricted live diagnostics maintained privately. A complete delegated
+coding turn remains unverified; private native results are not published here. No performance claim, package publication, release upload, push, or hosted
 CI run occurred.
 
 ## Implemented
@@ -245,3 +245,27 @@ Validation: 42 offline Rust tests, eight launcher tests, fmt/clippy, release bui
 and 228-package license inventory passed. The local HTTP native patch/verification
 integration also passed after its fixtures were updated to include nullable wire
 arguments. A new bounded live task requires explicit spend consent; not run yet.
+
+## Native action progress and explicit budget continuation — 2026-09-19
+
+- Claude wire arguments now live in separate named nullable payload objects, not
+  shared nullable fields. Cross-action payloads/fields are rejected. Canonical
+  runtime actions, hash validation and approvals remain unchanged.
+- Low-confidence selection prefers an untried policy-allowed read/search/rehydration
+  candidate before requesting another plan. This deterministic evidence fallback
+  is separately labeled; it does not grant write/process permissions or claim
+  confidence is correctness. Prior tool executions are not automatically replayed.
+- Planning fingerprints include the proposal contract version so schema changes
+  can be retried against existing evidence without resetting request counters.
+- Native resume supports explicitly changing total request/generation caps. Existing
+  usage is preserved, invalid caps are rejected and budget changes are journaled.
+- Authorized live diagnostics were conducted in a disposable private workspace;
+  provider-restricted traces and outcomes remain outside the repository. No live
+  performance figures or comparative claims are published here.
+- Regression tests cover named payload conversion, cross-action rejection,
+  evidence-before-replanning, repeat avoidance and persisted budget changes through
+  CLI approval/resume. See ADR 005. Existing stored sessions remain usable.
+Final local verification: 44 offline Rust tests, eight launcher tests, formatting,
+all-target clippy, release build and 228-package license inventory passed. The CLI
+headless approval/resume smoke passed with journaled budget updates and preserved
+counters. No provider-restricted trace or live measurement was staged for commit.

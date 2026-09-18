@@ -27,7 +27,14 @@ with tempfile.TemporaryDirectory(prefix="s1code-headless-") as directory:
         assert state["status"] == "awaiting_approval", state["status"]
         assert approvals < 3, "unexpected additional action"
         approvals += 1
-        events += command("resume", state["id"], "--headless", "--approve", state["pending"]["id"])
+        previous_simulated = state["metrics"]["simulated_turns"]
+        events += command("resume", state["id"], "--headless", "--approve", state["pending"]["id"],
+                          "--max-provider-requests", "32", "--max-generations", "16")
+        updated = json.loads(checkpoint.read_text())
+        assert updated["config"]["max_provider_requests"] == 32
+        assert updated["metrics"]["simulated_turns"] >= previous_simulated
+        journal = [json.loads(line) for line in (checkpoint.parent/'events.jsonl').read_text().splitlines()]
+        assert any(e['kind']=='budget_change_authorized' and e['data']['counters_reset'] is False for e in journal)
     assert approvals == 3
     assert state["verified"]["exit_code"] == 0
     assert state["metrics"]["generative_calls"] == 0

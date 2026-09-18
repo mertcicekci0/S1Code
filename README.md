@@ -83,8 +83,8 @@ s1code run "fix the failing parser test" --decision jev --max-provider-requests 
 ```
 
 Jev additionally needs `TYPESAFE_API_KEY`. It uses pinned `jev-1.13.0`. Native API
-integrations have local HTTP contract tests; billed inference was **not verified**
-in the build environment because API keys were unavailable. See
+integrations have local HTTP contract tests. Provider-restricted live validation
+records remain private; no benchmark or superiority claim is made. See
 [implementation status](docs/BUILD_STATUS.md) before relying on a provider path.
 
 For an OpenRouter Jev key, use `OPENROUTER_API_KEY` and add
@@ -106,8 +106,8 @@ s1code run "fix the failing parser test" --provider claude \
 
 The Claude adapter uses the public streaming Messages API with structured proposals.
 The default model is `claude-opus-5`; `--model` selects an explicit model. Local
-HTTP fixtures pass, including a real approved patch/test cycle. Billed Claude
-inference has not been verified. Claude subscription tokens are never imported.
+HTTP fixtures pass, including a real approved patch/test cycle. Live validation
+records are maintained privately. Claude subscription tokens are never imported.
 
 ## Headless and delegated modes
 

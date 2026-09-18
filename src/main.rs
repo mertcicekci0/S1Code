@@ -80,6 +80,11 @@ enum Commands {
         acknowledge_interruption: bool,
         #[arg(long)]
         continue_task: bool,
+        /// Explicit total session request cap, including requests already used.
+        #[arg(long)]
+        max_provider_requests: Option<u64>,
+        #[arg(long)]
+        max_generations: Option<u64>,
     },
     Sessions,
     Eval {
@@ -268,8 +273,33 @@ async fn execute(cmd: Commands, home: PathBuf) -> Result<()> {
             headless,
             acknowledge_interruption,
             continue_task,
+            max_provider_requests,
+            max_generations,
         } => {
             let (store, mut s) = Store::resume(&home, &id)?;
+            if max_provider_requests.is_some() || max_generations.is_some() {
+                ensure!(
+                    s.config.mode == Mode::Native,
+                    "native request caps cannot bound delegated inference"
+                );
+                let used = s.metrics.generative_calls + s.metrics.decision_requests;
+                if let Some(cap) = max_provider_requests {
+                    ensure!(
+                        cap > 0 && cap >= used,
+                        "total request cap must cover already-used requests"
+                    );
+                    s.config.max_provider_requests = cap;
+                }
+                if let Some(cap) = max_generations {
+                    ensure!(
+                        cap > 0 && cap >= s.metrics.generative_calls,
+                        "generation cap must cover already-used calls"
+                    );
+                    s.config.max_generations = cap;
+                }
+                let caps = serde_json::json!({"max_provider_requests":s.config.max_provider_requests,"max_generations":s.config.max_generations,"requests_already_used":used,"counters_reset":false});
+                store.record(&mut s, "budget_change_authorized", caps)?;
+            }
             if acknowledge_interruption {
                 ensure!(
                     !store.dir.join("patch-recovery.json").exists(),
@@ -495,6 +525,8 @@ async fn interactive_home(home: PathBuf) -> Result<()> {
                 approve: None,
                 headless: false,
                 acknowledge_interruption: false,
+                max_provider_requests: None,
+                max_generations: None,
             },
             Command::Login => Commands::Login {
                 provider: "codex".into(),

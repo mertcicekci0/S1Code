@@ -109,7 +109,11 @@ impl Engine {
                 continue;
             }
             let fingerprint = if matches!(chosen.action, Action::AskGenerator) {
-                crate::session::hash(&serde_json::to_vec(&(&chosen.id, &self.session.context))?)
+                crate::session::hash(&serde_json::to_vec(&(
+                    &chosen.id,
+                    &self.session.context,
+                    crate::generation::CONTRACT_VERSION,
+                ))?)
             } else {
                 chosen.id.clone()
             };
@@ -512,16 +516,22 @@ impl Engine {
                 else {
                     bail!("expected Choice")
                 };
-                let selection = if *confidence < self.session.config.jev_confidence {
-                    admissible
-                        .iter()
-                        .find(|c| matches!(c.action, Action::AskGenerator))
+                let preferred = admissible.iter().find(|c| c.id == *choice);
+                let low_confidence = *confidence < self.session.config.jev_confidence;
+                let evidence = untried_evidence(preferred, &admissible, &self.session.seen);
+                let selection = if low_confidence {
+                    evidence.or_else(|| {
+                        admissible
+                            .iter()
+                            .find(|c| matches!(c.action, Action::AskGenerator))
+                    })
                 } else {
-                    admissible.iter().find(|c| c.id == *choice)
+                    preferred
                 }
                 .cloned()
                 .ok_or_else(|| anyhow::anyhow!("selection unavailable"))?;
-                self.event("selection",json!({"source":"jev","candidate":selection.id,"choice":choice,"selection_probability":probabilities[choice],"distribution_confidence":confidence,"response":response,"threshold_experimental":true}))?;
+                let evidence_fallback = low_confidence && safe_evidence_action(&selection);
+                self.event("selection",json!({"source":if evidence_fallback {"jev_low_confidence_evidence"} else {"jev"},"candidate":selection.id,"choice":choice,"selection_probability":probabilities[choice],"distribution_confidence":confidence,"response":response,"threshold_experimental":true,"readonly_evidence_progress":evidence_fallback}))?;
                 Ok(selection)
             }
             Err(e) => {
@@ -652,4 +662,95 @@ impl Engine {
 
 pub fn workspace_for(s: &Session) -> Result<Workspace> {
     Workspace::new(Path::new(&s.workspace), s.config.exclusions.clone())
+}
+
+fn untried_evidence<'a>(
+    preferred: Option<&'a CandidateAction>,
+    candidates: &'a [CandidateAction],
+    seen: &std::collections::BTreeMap<String, usize>,
+) -> Option<&'a CandidateAction> {
+    preferred
+        .filter(|c| safe_evidence_action(c) && !seen.contains_key(&c.id))
+        .or_else(|| {
+            candidates
+                .iter()
+                .find(|c| safe_evidence_action(c) && !seen.contains_key(&c.id))
+        })
+}
+
+// Confidence is not permission or correctness. A validated, policy-allowed evidence
+// action can resolve uncertainty without another generation call.
+fn safe_evidence_action(candidate: &CandidateAction) -> bool {
+    candidate.class == PolicyClass::Allow
+        && matches!(
+            candidate.action,
+            Action::Read { .. } | Action::Search { .. } | Action::Rehydrate { .. }
+        )
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+    #[test]
+    fn uncertain_patch_can_gather_untried_evidence_without_replanning() {
+        let patch = policy::candidate(
+            Action::Patch { edits: vec![] },
+            "revision",
+            "fixture",
+            vec![],
+        );
+        let read = policy::candidate(
+            Action::Read {
+                path: "parser.py".into(),
+                start: 1,
+                lines: 40,
+            },
+            "revision",
+            "fixture",
+            vec![],
+        );
+        let candidates = vec![patch, read];
+        let mut seen = std::collections::BTreeMap::new();
+        assert_eq!(
+            untried_evidence(Some(&candidates[0]), &candidates, &seen)
+                .unwrap()
+                .id,
+            candidates[1].id
+        );
+        seen.insert(candidates[1].id.clone(), 1);
+        assert!(untried_evidence(Some(&candidates[0]), &candidates, &seen).is_none());
+    }
+    #[test]
+    fn only_allowed_evidence_actions_bypass_confidence_escalation() {
+        let read = policy::candidate(
+            Action::Read {
+                path: "parser.py".into(),
+                start: 1,
+                lines: 40,
+            },
+            "revision",
+            "fixture",
+            vec![],
+        );
+        assert!(safe_evidence_action(&read));
+        let mut denied = read.clone();
+        denied.class = PolicyClass::Deny;
+        assert!(!safe_evidence_action(&denied));
+        for action in [
+            Action::AskGenerator,
+            Action::List,
+            Action::Patch { edits: vec![] },
+            Action::Run {
+                argv: vec!["python3".into(), "-m".into(), "unittest".into()],
+                verification: true,
+            },
+        ] {
+            assert!(!safe_evidence_action(&policy::candidate(
+                action,
+                "revision",
+                "fixture",
+                vec![]
+            )));
+        }
+    }
 }

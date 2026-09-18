@@ -247,3 +247,9 @@ Credential management for this source launcher:
 This convenience belongs to `scripts/try_live.py`. The standalone Rust binary still
 reads provider keys from its environment; the launcher supplies only the needed keys
 to its child. Keys are absent from command arguments and build/tool environments.
+
+A native session's total budget can be explicitly updated with `s1code resume ID
+--max-provider-requests 16 --max-generations 12`. These are total session caps,
+including already-used requests, not extra allowances. The update is recorded and
+counters are never reset. Caps cannot be lower than usage already recorded. This is
+unsupported for delegated Codex inference whose internal calls remain unknown.
