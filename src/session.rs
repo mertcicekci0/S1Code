@@ -89,6 +89,7 @@ impl Store {
             bridge_turn: None,
             event_seq: 0,
             recovery_needed: false,
+            current_revision: String::new(),
         };
         store.save(&s)?;
         Ok((store, s))
@@ -151,6 +152,15 @@ impl Store {
     }
     pub fn record(&self, s: &mut Session, kind: &str, data: serde_json::Value) -> Result<RunEvent> {
         s.event_seq += 1;
+        let mut data = data;
+        if s.config.offline_demo
+            && let Some(object) = data.as_object_mut()
+        {
+            object.insert(
+                "execution_label".into(),
+                "OFFLINE SIMULATION — no model inference".into(),
+            );
+        }
         let event = RunEvent {
             seq: s.event_seq,
             session: s.id.clone(),

@@ -225,9 +225,14 @@ impl Jev {
         total: usize,
         state_limit: usize,
     ) -> Result<Self> {
+        let version = model.strip_prefix("jev-").unwrap_or("");
+        let components: Vec<_> = version.split('.').collect();
         ensure!(
-            !model.ends_with("latest") && !model.ends_with("preview"),
-            "pin a resolved Jev model version for reproducibility"
+            components.len() == 3
+                && components
+                    .iter()
+                    .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())),
+            "pin a resolved Jev model version such as jev-1.13.0 for reproducibility"
         );
         Ok(Self {
             client: reqwest::Client::builder()

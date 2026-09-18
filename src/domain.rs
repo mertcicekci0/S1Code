@@ -154,6 +154,8 @@ pub struct RunConfig {
     pub exclusions: Vec<String>,
     pub jev_fallback_rules: bool,
     pub jev_confidence: f64,
+    #[serde(default = "default_retention")]
+    pub jev_retention_threshold: f64,
     pub jev_request_limit: usize,
     pub jev_state_limit: usize,
     pub eviction: String,
@@ -174,6 +176,7 @@ impl Default for RunConfig {
             exclusions: vec![],
             jev_fallback_rules: false,
             jev_confidence: 0.5,
+            jev_retention_threshold: default_retention(),
             jev_request_limit: 64_000,
             jev_state_limit: 32_000,
             eviction: "conservative".into(),
@@ -184,6 +187,9 @@ impl Default for RunConfig {
 
 fn default_requests() -> u64 {
     24
+}
+fn default_retention() -> f64 {
+    0.5
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -207,6 +213,8 @@ pub struct Session {
     pub event_seq: u64,
     #[serde(default)]
     pub recovery_needed: bool,
+    #[serde(default)]
+    pub current_revision: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

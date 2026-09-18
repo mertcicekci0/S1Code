@@ -177,3 +177,61 @@ fn malformed_stream_never_becomes_action() {
     let mut s = Sse::default();
     assert!(s.push(b"data: not-json\n\n").is_err());
 }
+
+#[tokio::test]
+async fn permanent_errors_are_not_retried_and_exhaustion_is_explicit() {
+    for status in [401, 422] {
+        let (url, server) = mock(vec![(status, "{}".into())]).await;
+        let mut jev = Jev::new("test".into(), "jev-1.13.0", &url, 64000, 32000).unwrap();
+        let r = request();
+        let mut m = Metrics::default();
+        assert!(
+            jev.ask(r.state, r.questions, &CancellationToken::new(), &mut m)
+                .await
+                .is_err()
+        );
+        assert_eq!(m.decision_requests, 1);
+        assert_eq!(server.await.unwrap().len(), 1);
+    }
+    let (url, server) = mock(vec![
+        (529, "{}".into()),
+        (503, "{}".into()),
+        (429, "{}".into()),
+    ])
+    .await;
+    let mut jev = Jev::new("test".into(), "jev-1.13.0", &url, 64000, 32000).unwrap();
+    let r = request();
+    let mut m = Metrics::default();
+    let error = jev
+        .ask(r.state, r.questions, &CancellationToken::new(), &mut m)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("exhausted"));
+    assert_eq!(m.decision_requests, 3);
+    assert_eq!(m.retries, 2);
+    assert_eq!(server.await.unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn missing_completion_and_pre_cancelled_requests_fail_closed() {
+    let (url, server) = mock(vec![(
+        200,
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"{}\"}\n\n".into(),
+    )])
+    .await;
+    let provider = Responses::new("test".into(), "fixture", &url).unwrap();
+    let (tx, _) = mpsc::unbounded_channel();
+    assert!(
+        provider
+            .generate(json!({}), &CancellationToken::new(), tx)
+            .await
+            .is_err()
+    );
+    server.await.unwrap();
+    let provider = Responses::new("test".into(), "fixture", "http://127.0.0.1:1").unwrap();
+    let c = CancellationToken::new();
+    c.cancel();
+    let (tx, _) = mpsc::unbounded_channel();
+    let error = provider.generate(json!({}), &c, tx).await.err().unwrap();
+    assert!(error.to_string().contains("cancelled"));
+}

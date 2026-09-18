@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
-#[ignore = "starts official local App Server and creates then archives an empty disposable thread; no inference"]
+#[ignore = "starts official local App Server and creates an ephemeral disposable thread; no inference"]
 async fn codex_local_protocol() {
     let root = tempfile::tempdir().unwrap();
     let cancel = CancellationToken::new();
@@ -25,13 +25,8 @@ async fn codex_local_protocol() {
         .unwrap()
         .to_string_lossy()
         .into_owned();
-    let result=rpc.call("thread/start",json!({"cwd":cwd,"sandbox":"read-only","approvalPolicy":bridge::approval_policy(),"config":{"approvals_reviewer":"user","analytics.enabled":false,"mcp_servers":{},"apps._default.enabled":false}}),&cancel).await.unwrap();
-    let id = result["thread"]["id"].clone();
-    let validated = bridge::validate_permissions(&result, &cwd);
-    rpc.call("thread/archive", json!({"threadId":id}), &cancel)
-        .await
-        .unwrap();
-    validated.unwrap();
+    let result=rpc.call("thread/start",json!({"cwd":cwd,"ephemeral":true,"sandbox":"read-only","approvalPolicy":bridge::approval_policy(),"config":{"approvals_reviewer":"user","analytics.enabled":false,"mcp_servers":{},"apps._default.enabled":false}}),&cancel).await.unwrap();
+    bridge::validate_permissions(&result, &cwd).unwrap();
 }
 
 #[tokio::test]

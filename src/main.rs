@@ -52,6 +52,8 @@ struct RunArgs {
     jev_fallback_rules: bool,
     #[arg(long, default_value_t = 0.5)]
     jev_confidence: f64,
+    #[arg(long, default_value_t = 0.5)]
+    jev_retention_threshold: f64,
     #[arg(long, default_value_t = 64_000)]
     jev_request_limit: usize,
     #[arg(long, default_value_t = 32_000)]
@@ -70,6 +72,8 @@ enum Commands {
         headless: bool,
         #[arg(long)]
         acknowledge_interruption: bool,
+        #[arg(long)]
+        continue_task: bool,
     },
     Sessions,
     Eval {
@@ -172,6 +176,7 @@ async fn entry() -> Result<()> {
             headless: false,
             jev_fallback_rules: false,
             jev_confidence: 0.5,
+            jev_retention_threshold: 0.5,
             jev_request_limit: 64_000,
             jev_state_limit: 32_000,
             eviction: "conservative".into(),
@@ -180,6 +185,12 @@ async fn entry() -> Result<()> {
     match cmd {
         Commands::Run(a) => {
             ensure!(!a.task.trim().is_empty(), "task cannot be empty");
+            ensure!(
+                [a.jev_confidence, a.jev_retention_threshold]
+                    .iter()
+                    .all(|v| v.is_finite() && (0.0..=1.0).contains(v)),
+                "experimental decision thresholds must be finite values in 0..1"
+            );
             let config = RunConfig {
                 mode: if a.mode == "codex" {
                     Mode::Codex
@@ -202,6 +213,7 @@ async fn entry() -> Result<()> {
                 exclusions: a.exclude,
                 jev_fallback_rules: a.jev_fallback_rules,
                 jev_confidence: a.jev_confidence,
+                jev_retention_threshold: a.jev_retention_threshold,
                 jev_request_limit: a.jev_request_limit,
                 jev_state_limit: a.jev_state_limit,
                 eviction: a.eviction,
@@ -216,7 +228,7 @@ async fn entry() -> Result<()> {
             if let Some(generator) = generator {
                 drive(store, s, generator, a.headless, None).await?;
             } else {
-                drive_bridge(store, s, a.headless).await?;
+                drive_bridge(store, s, a.headless, false).await?;
             }
         }
         Commands::Demo {
@@ -244,6 +256,7 @@ async fn entry() -> Result<()> {
             approve,
             headless,
             acknowledge_interruption,
+            continue_task,
         } => {
             let (store, mut s) = Store::resume(&home, &id)?;
             if acknowledge_interruption {
@@ -264,7 +277,7 @@ async fn entry() -> Result<()> {
                 )?;
             }
             if s.config.mode == Mode::Codex {
-                drive_bridge(store, s, headless).await?;
+                drive_bridge(store, s, headless, continue_task).await?;
                 return Ok(());
             }
             let generator: Arc<dyn Generator> = if s.config.offline_demo {
@@ -349,15 +362,12 @@ async fn entry() -> Result<()> {
             let probe = home.join(format!(".probe-{}", uuid::Uuid::new_v4()));
             std::fs::write(&probe, b"ok")?;
             std::fs::remove_file(probe)?;
-            let codex = std::process::Command::new("codex")
-                .arg("--version")
-                .output()
-                .ok()
-                .filter(|o| o.status.success())
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned());
+            let compatibility = nerve::bridge::compatibility().await;
+            let codex = compatibility.as_ref().ok().cloned();
+            let diagnostic = compatibility.err().map(|e| e.to_string());
             println!(
                 "{}",
-                serde_json::json!({"name":brand::NAME,"version":env!("CARGO_PKG_VERSION"),"storage_version":brand::STORAGE_VERSION,"storage_writable":true,"openai_key_present":std::env::var_os("OPENAI_API_KEY").is_some(),"typesafe_key_present":std::env::var_os("TYPESAFE_API_KEY").is_some(),"codex_cli":codex,"native_security":{"os_sandbox":false,"network_isolation":false,"process_groups":cfg!(unix),"exact_approval":true},"supported_platforms":["macOS","Linux"],"telemetry":false})
+                serde_json::json!({"name":brand::NAME,"version":env!("CARGO_PKG_VERSION"),"storage_version":brand::STORAGE_VERSION,"storage_writable":true,"openai_key_present":std::env::var_os("OPENAI_API_KEY").is_some(),"typesafe_key_present":std::env::var_os("TYPESAFE_API_KEY").is_some(),"codex_cli":codex,"codex_diagnostic":diagnostic,"codex_cli_compatible":codex.as_deref()==Some(nerve::bridge::TESTED_CLI),"codex_cli_expected":nerve::bridge::TESTED_CLI,"native_security":{"os_sandbox":false,"network_isolation":false,"process_groups":cfg!(unix),"exact_approval":true},"supported_platforms":["macOS","Linux"],"telemetry":false})
             );
         }
         Commands::ContextDemo { workspace } => {
@@ -418,14 +428,14 @@ async fn drive(
     });
     let interactive = !headless && io::stdin().is_terminal() && io::stdout().is_terminal();
     let label = format!(
-        "native · {} · {}{}",
-        s.config.generation_model,
-        s.config.decision,
+        "{}native · {} · {}",
         if s.config.offline_demo {
-            " · OFFLINE SIMULATION"
+            "OFFLINE SIMULATION · "
         } else {
             ""
-        }
+        },
+        s.config.generation_model,
+        s.config.decision
     );
     let engine = Engine {
         workspace: workspace_for(&s)?,
@@ -489,7 +499,7 @@ async fn account_command(operation: &str) -> Result<()> {
     println!("{}", result?);
     Ok(())
 }
-async fn drive_bridge(store: Store, s: Session, headless: bool) -> Result<()> {
+async fn drive_bridge(store: Store, s: Session, headless: bool, continue_task: bool) -> Result<()> {
     let (events, rx) = mpsc::unbounded_channel();
     let (input, inputs) = mpsc::unbounded_channel();
     let cancel = CancellationToken::new();
@@ -506,6 +516,7 @@ async fn drive_bridge(store: Store, s: Session, headless: bool) -> Result<()> {
         inputs,
         cancel: cancel.clone(),
         interactive,
+        continue_task,
     };
     let task = tokio::spawn(bridge.run());
     present(

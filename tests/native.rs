@@ -72,6 +72,32 @@ async fn native_fixture_executes_patch_verification_and_persists() {
             .unwrap()
             .contains("int(text.strip())")
     );
+    fs::write(
+        root.path().join("parser.py"),
+        "def parse_integer(text):\n    return 0\n",
+    )
+    .unwrap();
+    let (store, session) = Store::resume(home.path(), &id).unwrap();
+    let (events, _rx) = mpsc::unbounded_channel();
+    let (_input, inputs) = mpsc::unbounded_channel();
+    let resumed = Engine {
+        workspace: workspace_for(&session).unwrap(),
+        generator: Arc::new(demo::OfflineDemo {
+            workspace: workspace_for(&session).unwrap(),
+        }),
+        store,
+        session,
+        cancel: CancellationToken::new(),
+        events,
+        input: inputs,
+        interactive: false,
+        approved: None,
+    }
+    .run()
+    .await
+    .unwrap();
+    assert_eq!(resumed.status, RunStatus::Blocked);
+    assert!(resumed.verified.is_none());
 }
 
 #[test]
@@ -150,6 +176,14 @@ fn fragmented_utf8_stream_and_partial_frame() {
     }
     parser.finish().unwrap();
     assert_eq!(output[0]["delta"], "héllo");
+    let mut mixed = Sse::default();
+    let records = mixed
+        .push(b"data: {\"first\":1}\r\n\r\ndata: {\"second\":2}\n\n")
+        .unwrap();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0]["first"], 1);
+    assert_eq!(records[1]["second"], 2);
+    mixed.finish().unwrap();
     let mut parser = Sse::default();
     parser.push(b"data: {").unwrap();
     assert!(parser.finish().is_err());
@@ -204,4 +238,60 @@ proptest::proptest! {
     fn unknown_programs_never_gain_permission(name in "[a-z]{1,20}"){
         if name!="cargo"&&name!="python3"{proptest::prop_assert!(!policy::valid_command(&[name]));}
     }
+}
+
+#[tokio::test]
+async fn exhausted_provider_budget_does_not_discard_an_approved_concrete_action() {
+    let root = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("test_small.py"), "import unittest\nclass Check(unittest.TestCase):\n def test_ok(self): self.assertEqual(1+1,2)\n").unwrap();
+    let (store, mut session) = Store::create(
+        home.path(),
+        root.path(),
+        "verify".into(),
+        RunConfig {
+            max_provider_requests: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let workspace = workspace_for(&session).unwrap();
+    let chosen = policy::candidate(
+        Action::Run {
+            argv: vec!["python3".into(), "-m".into(), "unittest".into()],
+            verification: true,
+        },
+        &workspace.revision().unwrap(),
+        "persisted candidate fixture",
+        vec![],
+    );
+    session.pending = Some(chosen.clone());
+    // Represent a previous decision request consuming the saved session's cap.
+    session.metrics.decision_requests = 1;
+    let (events, _rx) = mpsc::unbounded_channel();
+    let (_input, inputs) = mpsc::unbounded_channel();
+    let result = Engine {
+        generator: Arc::new(demo::OfflineDemo {
+            workspace: workspace_for(&session).unwrap(),
+        }),
+        workspace,
+        store,
+        session,
+        cancel: CancellationToken::new(),
+        events,
+        input: inputs,
+        interactive: false,
+        approved: Some(chosen.id),
+    }
+    .run()
+    .await
+    .unwrap();
+    assert!(
+        result.verified.is_some(),
+        "the already selected check can finish without another provider call"
+    );
+    assert_eq!(result.status, RunStatus::BudgetExhausted);
+    assert_eq!(result.metrics.generative_calls, 0);
+    assert_eq!(result.metrics.simulated_turns, 0);
+    assert_eq!(result.metrics.decision_requests, 1);
 }

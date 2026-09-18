@@ -44,6 +44,23 @@ pub struct EvalOptions {
     pub eviction: String,
     pub context_bytes: usize,
 }
+
+fn retain_trace(source: &Path, destination: &Path) -> Result<()> {
+    private_dir(destination)?;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        let target = destination.join(entry.file_name());
+        if kind.is_dir() {
+            retain_trace(&entry.path(), &target)?;
+        } else if kind.is_file() {
+            atomic_write(&target, &std::fs::read(entry.path())?)?;
+        } else {
+            anyhow::bail!("unexpected non-file in private session trace");
+        }
+    }
+    Ok(())
+}
 async fn hidden_check(
     root: &Path,
     control: &Path,
@@ -103,6 +120,10 @@ pub async fn evaluate(
             );
         }
     }
+    private_dir(output)?;
+    if !output.join(".gitignore").exists() {
+        atomic_write(&output.join(".gitignore"), b"*\n")?;
+    }
     let suite_bytes = std::fs::read(suite_path.join("suite.json"))?;
     let suite: Suite = serde_json::from_slice(&suite_bytes)?;
     let mut order = vec![];
@@ -116,10 +137,11 @@ pub async fn evaluate(
     order.shuffle(&mut rand::rngs::StdRng::seed_from_u64(opts.seed));
     let mut trials = vec![];
     let mut remaining = opts.request_budget.unwrap_or(0);
+    let per_trial_limit = remaining.min(24);
     let started = Instant::now();
     for (trial_no, (repeat, index, policy)) in order.iter().enumerate() {
         ensure!(!cancel.is_cancelled(), "evaluation cancelled");
-        if opts.live && remaining == 0 {
+        if opts.live && remaining < per_trial_limit {
             break;
         }
         let fixture = &suite.tasks[*index];
@@ -155,7 +177,7 @@ pub async fn evaluate(
             let config = RunConfig {
                 decision: policy.clone(),
                 generation_model: opts.model.clone(),
-                max_provider_requests: remaining.min(24),
+                max_provider_requests: per_trial_limit,
                 context_bytes: opts.context_bytes,
                 eviction: opts.eviction.clone(),
                 ..Default::default()
@@ -195,12 +217,7 @@ pub async fn evaluate(
             let trace_dir = output.join(format!("trial-{trial_no}"));
             private_dir(&trace_dir)?;
             let source = home.join("sessions").join(result.id);
-            for entry in std::fs::read_dir(&source)? {
-                let entry = entry?;
-                if entry.file_type()?.is_file() {
-                    std::fs::copy(entry.path(), trace_dir.join(entry.file_name()))?;
-                }
-            }
+            retain_trace(&source, &trace_dir)?;
         } else {
             // Offline validates the evaluator and reference patch. It is NOT an agent trial.
             let (store, _) =
@@ -230,15 +247,27 @@ pub async fn evaluate(
             );
             status = json!("fixture_validated_not_agent_success");
         }
-        trials.push(json!({"task":fixture.id,"repeat":repeat,"trial_order":trial_no,"policy":policy,"mode":if opts.live{"native_live"}else{"OFFLINE_FIXTURE_VALIDATION"},"starting_tree_hash":hash(&serde_json::to_vec(&fixture.files)?),"starting_commit":null,"settings":{"generation_model":opts.model,"eviction":opts.eviction,"context_bytes":opts.context_bytes,"jev_model":"jev-1.13.0","max_provider_requests":24},"initial_protected_checks_passed":initial_pass,"protected_checks_passed":final_pass,"agent_success":if opts.live{Some(final_pass)}else{None},"status":status,"metrics":metrics,"wall_ms":start.elapsed().as_millis()}));
+        trials.push(json!({"task":fixture.id,"repeat":repeat,"trial_order":trial_no,"policy":policy,"mode":if opts.live{"native_live"}else{"OFFLINE_FIXTURE_VALIDATION"},"starting_tree_hash":hash(&serde_json::to_vec(&fixture.files)?),"starting_commit":null,"settings":{"generation_model":opts.model,"eviction":opts.eviction,"context_bytes":opts.context_bytes,"jev_model":"jev-1.13.0","max_provider_requests":per_trial_limit},"initial_protected_checks_passed":initial_pass,"protected_checks_passed":final_pass,"agent_success":if opts.live{Some(final_pass)}else{None},"status":status,"metrics":metrics,"wall_ms":start.elapsed().as_millis()}));
     }
-    let source_commit = std::process::Command::new("git")
+    let mut git = tokio::process::Command::new("git");
+    crate::tools::clean_environment(&mut git);
+    let source_commit = git
         .args(["rev-parse", "HEAD"])
         .output()
+        .await
         .ok()
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned());
-    let report = json!({"format_version":1,"publication":"PRIVATE; provider-restricted measurements require documented clearance","kind":if opts.live{"live_agent_trials"}else{"OFFLINE evaluator validation; not model performance"},"suite_hash":hash(&suite_bytes),"split":suite.split,"source_commit":source_commit,"binary_version":env!("CARGO_PKG_VERSION"),"platform":{"os":std::env::consts::OS,"arch":std::env::consts::ARCH,"logical_cpus":std::thread::available_parallelism().ok().map(|n|n.get())},"seed":opts.seed,"sample_count":trials.len(),"wall_ms":started.elapsed().as_millis(),"request_budget_remaining":if opts.live{Some(remaining)}else{None},"cost":null,"trials":trials});
+    let mut git = tokio::process::Command::new("git");
+    crate::tools::clean_environment(&mut git);
+    let source_tree_dirty = git
+        .args(["status", "--porcelain"])
+        .output()
+        .await
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| !o.stdout.is_empty());
+    let report = json!({"format_version":1,"publication":"PRIVATE; provider-restricted measurements require documented clearance","kind":if opts.live{"live_agent_trials"}else{"OFFLINE evaluator validation; not model performance"},"suite_hash":hash(&suite_bytes),"split":suite.split,"source_commit":source_commit,"source_commit_scope":"invocation checkout; installed binary source must be recorded separately","source_tree_dirty":source_tree_dirty,"binary_version":env!("CARGO_PKG_VERSION"),"platform":{"os":std::env::consts::OS,"arch":std::env::consts::ARCH,"logical_cpus":std::thread::available_parallelism().ok().map(|n|n.get())},"seed":opts.seed,"sample_count":trials.len(),"wall_ms":started.elapsed().as_millis(),"request_budget_remaining":if opts.live{Some(remaining)}else{None},"cost":null,"trials":trials});
     private_dir(output)?;
     atomic_write(
         &output.join("report.json"),

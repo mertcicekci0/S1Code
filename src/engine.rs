@@ -30,6 +30,8 @@ impl Engine {
         if let Err(e) = result {
             self.session.status = if self.cancel.is_cancelled() {
                 RunStatus::Cancelled
+            } else if e.to_string().contains("budget") {
+                RunStatus::BudgetExhausted
             } else {
                 RunStatus::Failed
             };
@@ -39,6 +41,15 @@ impl Engine {
         Ok(self.session)
     }
     async fn drive(&mut self) -> Result<()> {
+        ensure!(
+            [
+                self.session.config.jev_confidence,
+                self.session.config.jev_retention_threshold
+            ]
+            .iter()
+            .all(|v| v.is_finite() && (0.0..=1.0).contains(v)),
+            "experimental decision thresholds must be finite values in 0..1"
+        );
         ensure!(
             self.session.config.mode == Mode::Native,
             "native engine cannot own delegated mode"
@@ -52,6 +63,16 @@ impl Engine {
             return Ok(());
         }
         if self.session.status == RunStatus::Completed {
+            if !self
+                .session
+                .verified
+                .as_ref()
+                .is_some_and(|v| self.workspace.revision().is_ok_and(|r| r == v.revision))
+            {
+                self.session.verified = None;
+                self.session.status = RunStatus::Blocked;
+                self.event("verification_stale", json!({"message":"Workspace changed since completion; previous checks do not verify its current state. Start a new task to verify the changes."}))?;
+            }
             return Ok(());
         }
         let mut jev =
@@ -74,13 +95,8 @@ impl Engine {
                 self.session.status = RunStatus::Cancelled;
                 break;
             }
-            if self.session.metrics.generative_calls + self.session.metrics.decision_requests
-                >= self.session.config.max_provider_requests
-            {
-                self.session.status = RunStatus::BudgetExhausted;
-                break;
-            }
             let revision = self.workspace.revision()?;
+            self.session.current_revision = revision.clone();
             let chosen = if let Some(pending) = self.session.pending.clone() {
                 pending
             } else {
@@ -120,6 +136,13 @@ impl Engine {
             *self.session.seen.entry(fingerprint).or_default() += 1;
             match &chosen.action {
                 Action::AskGenerator => {
+                    if self.session.metrics.generative_calls
+                        + self.session.metrics.decision_requests
+                        >= self.session.config.max_provider_requests
+                    {
+                        self.session.status = RunStatus::BudgetExhausted;
+                        break;
+                    }
                     if self.session.metrics.generative_calls + self.session.metrics.simulated_turns
                         >= self.session.config.max_generations
                     {
@@ -208,7 +231,11 @@ impl Engine {
                                 "native_tool",
                                 &chosen.id,
                                 &revision,
-                                vec![],
+                                if matches!(action, Action::Patch { .. }) {
+                                    chosen.evidence.clone()
+                                } else {
+                                    vec![]
+                                },
                             )?;
                             let pinned = matches!(action, Action::Patch { .. })
                                 || matches!(action,Action::Read{path,..} if path.ends_with("AGENTS.md"));
@@ -256,6 +283,21 @@ impl Engine {
                             }
                             self.session.inflight = None;
                             self.session.proposals.clear();
+                            let message = self.store.redactor.text(&e.to_string());
+                            let artifact = self.store.put(
+                                message.as_bytes(),
+                                "native_tool_error",
+                                &chosen.id,
+                                &revision,
+                                vec![],
+                            )?;
+                            self.session.context.push(ContextItem {
+                                artifact,
+                                action: action.clone(),
+                                pinned: false,
+                                evicted: false,
+                                diagnostic: true,
+                            });
                             self.event(
                                 "tool_error",
                                 json!({"candidate":chosen.id,"message":e.to_string()}),
@@ -344,7 +386,48 @@ impl Engine {
         Ok(actions
             .into_iter()
             .take(8)
-            .map(|a| policy::candidate(a, revision, provenance, evidence.clone()))
+            .map(|a| {
+                let validation = match &a {
+                    Action::Read { path, start, lines } => {
+                        self.workspace.path(path, false).and_then(|_| {
+                            ensure!(
+                                *start > 0 && *lines > 0 && *lines <= 300,
+                                "invalid read range"
+                            );
+                            Ok(())
+                        })
+                    }
+                    Action::Search { query } => {
+                        if query.is_empty() || query.len() > 256 {
+                            Err(anyhow::anyhow!("invalid literal search"))
+                        } else {
+                            Ok(())
+                        }
+                    }
+                    Action::Patch { edits } => self.workspace.validate_edits(edits).map(|_| ()),
+                    Action::Rehydrate { artifact } => {
+                        if self
+                            .session
+                            .context
+                            .iter()
+                            .any(|c| c.artifact.hash == *artifact)
+                        {
+                            self.store.get(artifact).map(|_| ())
+                        } else {
+                            Err(anyhow::anyhow!(
+                                "artifact is outside current session context"
+                            ))
+                        }
+                    }
+                    _ => Ok(()),
+                };
+                let mut candidate = policy::candidate(a, revision, provenance, evidence.clone());
+                if let Err(error) = validation {
+                    candidate.class = PolicyClass::Deny;
+                    candidate.provenance = format!("deterministic input rejection: {error}");
+                }
+                candidate
+            })
             .collect())
     }
     async fn select(
@@ -377,6 +460,11 @@ impl Engine {
         state["candidates"] = serde_json::to_value(&admissible)?;
         state["policy_version"] = crate::brand::POLICY_VERSION.into();
         if self.session.config.decision == "generative" {
+            ensure!(
+                self.session.metrics.generative_calls + self.session.metrics.decision_requests
+                    < self.session.config.max_provider_requests,
+                "provider request budget exhausted"
+            );
             ensure!(
                 self.session.metrics.generative_calls < self.session.config.max_generations,
                 "generative decision budget exhausted"
@@ -496,14 +584,14 @@ impl Engine {
                     Ok(response) => {
                         for (id, answer) in &response.answers {
                             if let Answer::Noul { noul } = answer
-                                && *noul < 0.5
+                                && *noul < self.session.config.jev_retention_threshold
                             {
                                 drop_ids.insert(id.clone());
                             }
                         }
                         self.event(
                             "eviction_decision",
-                            json!({"response":response,"noul_is_not_confidence":true}),
+                            json!({"response":response,"noul_is_not_confidence":true,"experimental_retention_threshold":self.session.config.jev_retention_threshold}),
                         )?;
                     }
                     Err(e) => {

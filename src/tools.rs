@@ -20,6 +20,7 @@ pub const MAX_FILE: usize = 512 * 1024;
 pub const MAX_OUTPUT: usize = 64 * 1024;
 pub const MAX_FILES: usize = 10_000;
 
+#[derive(Clone)]
 pub struct Workspace {
     pub root: PathBuf,
     exclusions: Vec<String>,
@@ -47,28 +48,29 @@ impl Workspace {
         {
             return false;
         }
-        relative.components().all(|c| match c {
-            Component::Normal(x) => {
-                let n = x.to_string_lossy().to_lowercase();
-                !n.starts_with('.')
-                    && ![
-                        "target",
-                        "node_modules",
-                        "__pycache__",
-                        "credentials",
-                        "secrets",
-                        "private",
-                        "eval-results",
-                        "id_rsa",
-                        "id_ed25519",
-                    ]
-                    .contains(&n.as_str())
-                    && !n.ends_with(".pem")
-                    && !n.ends_with(".key")
-                    && !n.ends_with(".env")
-            }
-            _ => false,
-        })
+        relative.components().count() <= 32
+            && relative.components().all(|c| match c {
+                Component::Normal(x) => {
+                    let n = x.to_string_lossy().to_lowercase();
+                    !n.starts_with('.')
+                        && ![
+                            "target",
+                            "node_modules",
+                            "__pycache__",
+                            "credentials",
+                            "secrets",
+                            "private",
+                            "eval-results",
+                            "id_rsa",
+                            "id_ed25519",
+                        ]
+                        .contains(&n.as_str())
+                        && !n.ends_with(".pem")
+                        && !n.ends_with(".key")
+                        && !n.ends_with(".env")
+                }
+                _ => false,
+            })
     }
     pub fn path(&self, relative: &str, new: bool) -> Result<PathBuf> {
         let path = Path::new(relative);
@@ -133,7 +135,16 @@ impl Workspace {
     }
     pub fn files(&self) -> Result<Vec<String>> {
         let mut out = vec![];
+        let guard = self.clone();
         for item in WalkBuilder::new(&self.root)
+            .filter_entry(move |entry| {
+                entry.depth() == 0
+                    || entry
+                        .path()
+                        .strip_prefix(&guard.root)
+                        .is_ok_and(|path| guard.allowed_name(path))
+            })
+            .max_depth(Some(32))
             .hidden(true)
             .follow_links(false)
             .require_git(false)
@@ -240,8 +251,16 @@ impl Workspace {
     }
     pub fn apply(&self, edits: &[Edit], store: &Store, revision: &str) -> Result<()> {
         let original = self.validate_edits(edits)?;
+        for (_, bytes) in &original {
+            ensure!(
+                !bytes
+                    .as_ref()
+                    .is_some_and(|b| store.redactor.contains_secret(&String::from_utf8_lossy(b))),
+                "patch touches a known secret-bearing file; edit it outside the agent"
+            );
+        }
         let mut recovery = vec![];
-        for (edit, (_, bytes)) in edits.iter().zip(&original) {
+        for (edit, (path, bytes)) in edits.iter().zip(&original) {
             let before = bytes
                 .as_ref()
                 .map(|b| store.put(b, "patch_backup", "patch", revision, vec![]))
@@ -251,6 +270,11 @@ impl Workspace {
                 path: edit.path.clone(),
                 before,
                 after: hash(edit.content.as_bytes()),
+                #[cfg(unix)]
+                before_mode: {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::metadata(path).ok().map(|m| m.permissions().mode())
+                },
             });
         }
         let journal = store.dir.join("patch-recovery.json");
@@ -291,6 +315,11 @@ impl Workspace {
             let p = self.path(&r.path, true)?;
             if let Some(before) = r.before {
                 atomic_write(&p, &store.get(&before)?)?;
+                #[cfg(unix)]
+                if let Some(mode) = r.before_mode {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(&p, fs::Permissions::from_mode(mode))?;
+                }
             } else if p.exists() {
                 fs::remove_file(p)?;
             }
@@ -382,6 +411,22 @@ impl Workspace {
             }
             Action::Git => {
                 // Builtin git inspections do not run aliases, external diff drivers, pagers, or hooks.
+                let filters = process(
+                    &self.root,
+                    &["git", "config", "--includes", "--get-regexp", "^filter\\."]
+                        .map(String::from),
+                    cancel,
+                    Duration::from_secs(10),
+                )
+                .await?;
+                ensure!(
+                    filters.exit_code != Some(0),
+                    "repository Git filters may execute code; automatic Git inspection is disabled for this repository"
+                );
+                ensure!(
+                    filters.exit_code == Some(1),
+                    "unable to inspect Git configuration safely"
+                );
                 let paths = self.files()?;
                 if paths.is_empty() {
                     return Ok(ToolResult {
@@ -402,6 +447,8 @@ impl Workspace {
                 ]
                 .map(String::from)
                 .to_vec();
+                status_args.insert(1, format!("--work-tree={}", self.root.display()));
+                status_args.insert(status_args.len() - 1, "--ignore-submodules=all".into());
                 status_args.extend(paths.clone());
                 let mut diff_args = [
                     "git",
@@ -416,6 +463,8 @@ impl Workspace {
                 ]
                 .map(String::from)
                 .to_vec();
+                diff_args.insert(1, format!("--work-tree={}", self.root.display()));
+                diff_args.insert(diff_args.len() - 1, "--ignore-submodules=all".into());
                 diff_args.extend(paths);
                 let status =
                     process(&self.root, &status_args, cancel, Duration::from_secs(10)).await?;
@@ -440,6 +489,9 @@ struct RecoveryFile {
     path: String,
     before: Option<String>,
     after: String,
+    #[cfg(unix)]
+    #[serde(default)]
+    before_mode: Option<u32>,
 }
 
 pub fn bound(s: &str, max: usize) -> String {
@@ -470,6 +522,7 @@ pub fn clean_environment(cmd: &mut Command) {
     }
     cmd.env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("PYTHONDONTWRITEBYTECODE", "1");
 }

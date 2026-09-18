@@ -115,7 +115,7 @@ impl Rpc {
             next_id: 1,
             queue: VecDeque::new(),
         };
-        rpc.call("initialize",json!({"clientInfo":{"name":brand::BIN,"title":brand::NAME,"version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":false}}),cancel).await?;
+        rpc.call("initialize",json!({"clientInfo":{"name":brand::BIN,"title":brand::NAME,"version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":true}}),cancel).await?;
         rpc.send(json!({"method":"initialized","params":{}}))
             .await?;
         Ok(rpc)
@@ -173,8 +173,13 @@ impl Rpc {
                 if v["id"] == id && v.get("method").is_none() {
                     ensure!(
                         v.get("error").is_none(),
-                        "App Server rejected {method}: code {} (check CLI/schema/permissions)",
-                        v["error"]["code"]
+                        "App Server rejected {method}: code {} — {}",
+                        v["error"]["code"],
+                        crate::privacy::Redactor::environment("").text(
+                            v["error"]["message"]
+                                .as_str()
+                                .unwrap_or("check CLI/schema/permissions")
+                        )
                     );
                     return Ok(v["result"].clone());
                 }
@@ -241,6 +246,10 @@ pub fn validate_permissions(result: &Value, workspace: &str) -> Result<()> {
         "upstream changed approval policy; refusing delegation"
     );
     ensure!(
+        result["approvalsReviewer"] == "user",
+        "upstream changed approval reviewer"
+    );
+    ensure!(
         result["sandbox"]["type"] == "readOnly" && result["sandbox"]["networkAccess"] != true,
         "upstream changed sandbox/network policy; refusing delegation"
     );
@@ -294,6 +303,7 @@ pub struct Bridge {
     pub inputs: mpsc::UnboundedReceiver<UiInput>,
     pub cancel: CancellationToken,
     pub interactive: bool,
+    pub continue_task: bool,
 }
 impl Bridge {
     fn event(&mut self, kind: &str, data: Value) -> Result<()> {
@@ -320,6 +330,17 @@ impl Bridge {
             self.session.config.exclusions.is_empty(),
             "native path exclusions cannot be enforced inside Codex; use native mode or configure Codex separately"
         );
+        if let Some(verified) = &self.session.verified {
+            let current = crate::tools::Workspace::new(Path::new(&self.session.workspace), vec![])?
+                .revision()?;
+            if current != verified.revision {
+                self.session.verified = None;
+                if self.session.status == RunStatus::Completed {
+                    self.session.status = RunStatus::Blocked;
+                }
+                self.event("verification_stale", json!({"message":"Workspace changed since the observed upstream check. Previous verification is historical."}))?;
+            }
+        }
         if self.session.status == RunStatus::Completed {
             return Ok(());
         }
@@ -348,7 +369,8 @@ impl Bridge {
             .to_owned();
         self.session.bridge_thread = Some(thread.clone());
         self.event("bridge_connected",json!({"mode":"codex_delegated","thread":thread,"model":result["model"],"cli":TESTED_CLI,"sandbox":"readOnly","approval":"granular_all_gates","native_exclusions_enforced":false}))?;
-        // A saved turn is observed through thread/read. It is never resubmitted.
+        let mut items = BTreeMap::<String, Value>::new();
+        let mut active_saved_turn = None;
         if let Some(turn) = self.session.bridge_turn.clone() {
             let snapshot = rpc
                 .call(
@@ -357,34 +379,76 @@ impl Bridge {
                     &self.cancel,
                 )
                 .await?;
-            let status = snapshot["thread"]["turns"]
+            let saved = snapshot["thread"]["turns"]
                 .as_array()
                 .and_then(|ts| ts.iter().find(|t| t["id"] == turn))
-                .and_then(|t| t["status"].as_str())
-                .unwrap_or("unknown");
-            self.session.status = RunStatus::Blocked;
-            self.event("bridge_resume_observed",json!({"turn":turn,"upstream_status":status,"automatic_resubmit":false,"message":"Previous delegated turn observed. Review the upstream record before starting another task."}))?;
-            return Ok(());
+                .context("saved turn not found; refusing resubmission")?;
+            let status = saved["status"].as_str().unwrap_or("unknown");
+            self.event(
+                "bridge_resume_observed",
+                json!({"turn":turn,"upstream_status":status,"automatic_resubmit":false}),
+            )?;
+            if let Some(saved_items) = saved["items"].as_array() {
+                for item in saved_items {
+                    if let Some(id) = item["id"].as_str() {
+                        items.insert(id.into(), item.clone());
+                    }
+                }
+            }
+            if status == "inProgress" {
+                active_saved_turn = Some(turn);
+            } else {
+                ensure!(
+                    ["completed", "interrupted", "failed"].contains(&status),
+                    "unknown upstream turn status; inspect official CLI"
+                );
+                if !self.continue_task {
+                    self.session.recovery_needed = false;
+                    self.session.status = match status {
+                        "interrupted" => RunStatus::Cancelled,
+                        "failed" => RunStatus::Failed,
+                        _ => {
+                            if self.session.verified.is_some() {
+                                RunStatus::Completed
+                            } else {
+                                RunStatus::Blocked
+                            }
+                        }
+                    };
+                    self.event("bridge_resume_stopped",json!({"message":"Observed saved turn without rerunning. Use resume --continue-task to explicitly request a new turn after inspecting state.","upstream_status":status}))?;
+                    return Ok(());
+                }
+                self.session.bridge_turn = None;
+                self.session.recovery_needed = false;
+                self.session.verified = None;
+                self.event(
+                    "bridge_continue_authorized",
+                    json!({"previous_turn":turn,"new_turn_requested":true}),
+                )?;
+            }
         }
-        ensure!(
-            !self.session.recovery_needed,
-            "delegation completion unknown; inspect upstream thread, no resubmission"
-        );
-        // Persist intent before sending. A crash between intent and response must not replay.
-        self.session.recovery_needed = true;
-        self.session.metrics.delegations += 1;
-        self.event("delegation_started",json!({"task":self.session.task,"execution_owner":"official Codex","usage_unknown":true}))?;
-        let started=rpc.call("turn/start",json!({"threadId":thread,"input":[{"type":"text","text":format!("{}\nScope: one bounded coding task. Inspect changes, run relevant verification, report results. Do not commit or push. Stop if blocked.",self.session.task)}],"cwd":self.session.workspace,"approvalPolicy":approval_policy(),"sandboxPolicy":{"type":"readOnly","networkAccess":false}}),&self.cancel).await?;
-        let turn = started["turn"]["id"]
-            .as_str()
-            .context("turn missing id")?
-            .to_owned();
+        let turn = if let Some(turn) = active_saved_turn {
+            turn
+        } else {
+            ensure!(
+                !self.session.recovery_needed,
+                "delegation completion unknown; inspect upstream thread, no resubmission"
+            );
+            self.session.recovery_needed = true;
+            self.session.metrics.delegations += 1;
+            self.event("delegation_started",json!({"task":self.session.task,"execution_owner":"official Codex","usage_unknown":true}))?;
+            let started=rpc.call("turn/start",json!({"threadId":thread,"input":[{"type":"text","text":format!("{}\nScope: one bounded coding task. Inspect current state and prior evidence before acting. Run relevant verification and report results. Do not commit or push. Stop if blocked.",self.session.task)}],"cwd":self.session.workspace,"approvalPolicy":approval_policy(),"sandboxPolicy":{"type":"readOnly","networkAccess":false}}),&self.cancel).await?;
+            started["turn"]["id"]
+                .as_str()
+                .context("turn missing id")?
+                .to_owned()
+        };
         self.session.bridge_turn = Some(turn.clone());
         self.session.status = RunStatus::Running;
         self.store.save(&self.session)?;
         let mut answered = ApprovalLedger::default();
-        let mut items = BTreeMap::<String, Value>::new();
-        let mut check_seen = false;
+        let mut check_seen = self.session.verified.is_some();
+        let mut display_streams = BTreeMap::<String, crate::privacy::StreamRedactor>::new();
         loop {
             let event = tokio::select! {biased;_=self.cancel.cancelled()=>{let fresh=CancellationToken::new();let _=rpc.call("turn/interrupt",json!({"threadId":thread,"turnId":turn}),&fresh).await;self.session.status=RunStatus::Cancelled;self.event("bridge_interrupted",json!({"turn":turn,"resubmit":false}))?;return Ok(())},e=rpc.next(&self.cancel)=>e?};
             let method = event["method"].as_str().unwrap_or("");
@@ -440,19 +504,73 @@ impl Bridge {
             if p.get("turnId").is_some() && p["turnId"] != turn {
                 continue;
             }
+            if [
+                "item/agentMessage/delta",
+                "item/commandExecution/outputDelta",
+                "item/fileChange/outputDelta",
+            ]
+            .contains(&method)
+            {
+                let id = p["itemId"].as_str().unwrap_or("upstream").to_owned();
+                let mut params = p.clone();
+                params["delta"] = display_streams
+                    .entry(id)
+                    .or_insert_with(|| {
+                        crate::privacy::StreamRedactor::new(self.store.redactor.clone())
+                    })
+                    .push(p["delta"].as_str().unwrap_or(""))
+                    .into();
+                self.event(
+                    "upstream",
+                    json!({"method":method,"params":params,"execution_owner":"official Codex"}),
+                )?;
+                continue;
+            }
+            if method == "item/completed"
+                && let Some(mut stream) =
+                    display_streams.remove(p["item"]["id"].as_str().unwrap_or("upstream"))
+            {
+                self.event("upstream",json!({"method":"item/agentMessage/delta","params":{"itemId":p["item"]["id"],"delta":stream.finish()},"execution_owner":"official Codex"}))?;
+            }
             if method == "item/started" || method == "item/completed" {
                 if let Some(id) = p["item"]["id"].as_str() {
                     items.insert(id.into(), p["item"].clone());
                 }
                 if p["item"]["type"] == "fileChange" {
                     check_seen = false;
+                    self.session.verified = None;
                 }
                 if method == "item/completed"
                     && p["item"]["type"] == "commandExecution"
                     && p["item"]["exitCode"] == 0
                 {
                     let command = p["item"]["command"].as_str().unwrap_or("");
-                    if command.contains("test") || command.contains("check") {
+                    let command = command.trim();
+                    if ["cargo test", "cargo check", "python3 -m unittest"]
+                        .iter()
+                        .any(|prefix| {
+                            command == *prefix || command.starts_with(&format!("{prefix} "))
+                        })
+                    {
+                        let workspace = crate::tools::Workspace::new(
+                            Path::new(&self.session.workspace),
+                            vec![],
+                        )?;
+                        let revision = workspace.revision()?;
+                        let bytes = serde_json::to_vec(&self.store.redactor.value(&p["item"]))?;
+                        let artifact = self.store.put(
+                            &bytes,
+                            "codex_reported_check",
+                            p["item"]["id"].as_str().unwrap_or("upstream"),
+                            &revision,
+                            vec![],
+                        )?;
+                        self.session.verified = Some(Verification {
+                            argv: vec!["codex-reported-command".into(), command.into()],
+                            revision,
+                            artifact: artifact.hash,
+                            exit_code: 0,
+                        });
                         check_seen = true;
                     }
                 }
@@ -481,6 +599,15 @@ impl Bridge {
                 json!({"method":method,"params":p,"execution_owner":"official Codex"}),
             )?;
             if method == "turn/completed" && p["turn"]["id"] == turn {
+                if let Some(verified) = &self.session.verified {
+                    let current =
+                        crate::tools::Workspace::new(Path::new(&self.session.workspace), vec![])?
+                            .revision()?;
+                    if current != verified.revision {
+                        self.session.verified = None;
+                        check_seen = false;
+                    }
+                }
                 self.session.recovery_needed = false;
                 self.session.status = match p["turn"]["status"].as_str() {
                     Some("completed") if check_seen => RunStatus::Completed,

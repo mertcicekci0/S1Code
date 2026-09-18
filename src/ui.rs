@@ -33,8 +33,8 @@ pub async fn terminal(
     label: String,
 ) -> Result<Option<RunEvent>> {
     enable_raw_mode()?;
-    execute!(io::stdout(), EnterAlternateScreen)?;
     let _restore = Restore;
+    execute!(io::stdout(), EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     let mut keys = EventStream::new();
     let mut entries = VecDeque::new();

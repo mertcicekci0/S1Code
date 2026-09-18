@@ -3,7 +3,9 @@
 The official installed CLI reports 0.153.3. Its generated App Server schema still
 includes `untrusted`, while the executable rejects that setting at startup. The
 current web documentation uses a different spelling in some examples. A real
-handshake probe established that the schema's granular policy is accepted. Nerve
+handshake probe established that the schema's granular policy is accepted. A thread-start probe further established that this
+policy requires the documented `experimentalApi` capability; the handshake opts
+in explicitly for that policy. Unknown experimental requests still fail closed. Nerve
 sets every granular approval gate to true, keeps read-only sandboxing with network
 disabled, and forces the user approval reviewer. It verifies returned permissions
 before delegating. This is a process-local override, not an account/config change.

@@ -101,12 +101,14 @@ impl Sse {
                 .windows(2)
                 .position(|w| w == b"\n\n")
                 .map(|i| (i, 2))
-                .or_else(|| {
+                .into_iter()
+                .chain(
                     self.pending
                         .windows(4)
                         .position(|w| w == b"\r\n\r\n")
-                        .map(|i| (i, 4))
-                });
+                        .map(|i| (i, 4)),
+                )
+                .min_by_key(|(i, _)| *i);
             let Some((i, n)) = boundary else { break };
             let bytes: Vec<u8> = self.pending.drain(..i + n).collect();
             let frame = std::str::from_utf8(&bytes)?;
@@ -168,12 +170,14 @@ impl Generator for Responses {
             for event in parser.push(&chunk)? {
                 match event["type"].as_str().unwrap_or("") {
                     "response.output_text.delta" => {
+                        ensure!(!completed, "text received after response completed");
                         let d = event["delta"].as_str().context("text delta missing")?;
                         text.push_str(d);
                         let _ = deltas.send(d.into());
                         ensure!(text.len() <= 512 * 1024, "proposal too large");
                     }
                     "response.completed" => {
+                        ensure!(!completed, "duplicate completion event");
                         ensure!(
                             event["response"]["status"] == "completed",
                             "response did not complete"
