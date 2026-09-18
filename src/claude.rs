@@ -224,11 +224,21 @@ impl Generator for Claude {
         ensure!(!cancel.is_cancelled(), "generation cancelled");
         let body = json!({"model":self.model,"system":INSTRUCTIONS,"messages":[{"role":"user","content":input.to_string()}],"stream":true,"max_tokens":8192,"output_config":{"format":{"type":"json_schema","schema":schema()}}});
         let response = tokio::select! {biased; _=cancel.cancelled()=>bail!("generation cancelled"), r=self.client.post(&self.endpoint).header("x-api-key", &self.key).header("anthropic-version", "2023-06-01").json(&body).send()=>r.context("Claude transport failed")?};
-        ensure!(
-            response.status().is_success(),
-            "Claude HTTP {}; check API key, model access and quota",
-            response.status()
-        );
+        if !response.status().is_success() {
+            let status = response.status();
+            let mut bytes = Vec::new();
+            let mut stream = response.bytes_stream();
+            loop {
+                let chunk = tokio::select! {biased; _=cancel.cancelled()=>bail!("generation cancelled"), next=stream.next()=>next};
+                let Some(Ok(chunk)) = chunk else { break };
+                if bytes.len() + chunk.len() > 16 * 1024 {
+                    bytes.clear();
+                    break;
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            bail!("{}", http_error(status.as_u16(), &bytes, &self.key));
+        }
         let mut stream = response.bytes_stream();
         let mut parser = Sse::default();
         let mut message = Message::default();
@@ -248,5 +258,66 @@ impl Generator for Claude {
         }
         parser.finish()?;
         message.finish()
+    }
+}
+
+// Only selected error fields are displayed, never headers or the complete response.
+fn http_error(status: u16, body: &[u8], key: &str) -> String {
+    let value: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
+    let safe = |text: &str| {
+        let text = crate::privacy::Redactor::with_secrets(vec![key.to_owned()]).text(text);
+        let text = crate::privacy::Redactor::environment("").text(&text);
+        text.split_whitespace()
+            .map(|word| {
+                if word.contains("sk-") || word.contains("apikey_") {
+                    "[REDACTED]"
+                } else {
+                    word
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars()
+            .take(1500)
+            .collect::<String>()
+    };
+    let kind = safe(value["error"]["type"].as_str().unwrap_or("unknown_error"));
+    let message = safe(
+        value["error"]["message"]
+            .as_str()
+            .unwrap_or("Provider returned no readable JSON error details."),
+    );
+    let request = safe(value["request_id"].as_str().unwrap_or("unavailable"));
+    format!(
+        "Claude HTTP {status} ({kind}): {message}\nRequest ID: {request}. No automatic retry or provider fallback."
+    )
+}
+
+#[cfg(test)]
+mod error_tests {
+    use super::*;
+    #[test]
+    fn http_errors_preserve_cause_without_keys_headers_or_terminal_controls() {
+        let body = json!({"error":{"type":"invalid_request_error","message":"credit balance too low. fixture-private-key sk-ant-api-fixture \u{1b}[31m"},"request_id":"req_fixture","headers":{"authorization":"never-display-this"}});
+        let text = http_error(
+            400,
+            &serde_json::to_vec(&body).unwrap(),
+            "fixture-private-key",
+        );
+        assert!(text.contains("credit balance too low") && text.contains("req_fixture"));
+        assert!(
+            !text.contains("fixture-private-key")
+                && !text.contains("sk-ant-api")
+                && !text.contains("never-display-this")
+                && !text.contains('\u{1b}')
+        );
+        assert!(
+            http_error(502, b"<html>private upstream dump</html>", "key")
+                .contains("no readable JSON")
+        );
+        assert!(
+            !http_error(502, b"<html>private upstream dump</html>", "key")
+                .contains("private upstream")
+        );
     }
 }

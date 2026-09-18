@@ -113,7 +113,14 @@ async fn mock(responses: Vec<(u16, String)>) -> (String, tokio::task::JoinHandle
                 body.len()
             );
             for chunk in response.as_bytes().chunks(7) {
-                socket.write_all(chunk).await.unwrap();
+                if let Err(error) = socket.write_all(chunk).await {
+                    // A bounded reader intentionally closes oversized responses early.
+                    assert!(matches!(
+                        error.kind(),
+                        std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset
+                    ));
+                    break;
+                }
             }
         }
         requests
@@ -573,4 +580,23 @@ async fn claude_http_fixture_drives_native_patch_and_real_verification() {
     );
     let (_, resumed) = Store::resume(home.path(), &session.id).unwrap();
     assert_eq!(resumed.config.generation_provider, "claude");
+}
+
+#[tokio::test]
+async fn claude_http_rejection_reports_sanitized_reason_without_retry() {
+    for body in [
+        json!({"error":{"type":"invalid_request_error","message":"credit balance too low fixture-credential"},"request_id":"req_fixture"}).to_string(),
+        "x".repeat(20_000),
+    ] {
+        let oversized=body.len()>16*1024;
+        let (url,server)=mock(vec![(400,body)]).await;
+        let generator=s1code::claude::Claude::new("fixture-credential".into(),"claude-fixture",&url).unwrap();
+        let (tx,mut rx)=mpsc::unbounded_channel();
+        let error=generator.generate(json!({}),&CancellationToken::new(),tx).await.err().unwrap().to_string();
+        assert!(error.contains("400") && !error.contains("fixture-credential"));
+        if oversized { assert!(error.contains("no readable JSON")); }
+        else { assert!(error.contains("credit balance too low") && error.contains("req_fixture")); }
+        assert!(rx.try_recv().is_err());
+        assert_eq!(server.await.unwrap().len(),1);
+    }
 }

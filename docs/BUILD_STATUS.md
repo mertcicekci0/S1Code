@@ -171,3 +171,17 @@ credentials and execution/request-budget consent. Keep results private.
   release build and 228-package license inventory passed. All four PTY/headless smoke
   scripts passed, including `python3 scripts/conversation_smoke.py`. Launcher help
   and key-isolated child environments were checked without provider requests.
+
+## Live check rejection — 2026-09-19
+
+The user ran the two-request launcher and supplied a screenshot of Claude HTTP 400.
+Claude failed before OpenRouter was attempted. The old adapter discarded the error
+body, so the underlying account/request cause remains unknown. This is a failed live
+check, not a successful integration validation. Added bounded/redacted JSON error
+messages and request IDs, without retry or fallback, and removed the Claude live
+check's unwrap panic. Unit and local HTTP regression tests cover detail preservation,
+secret removal, non-JSON/oversized responses and a single request with no deltas.
+No new live request was made by the agent.
+Validation: 40 offline tests, fmt/clippy, release build and the 228-package license
+inventory passed after this fix. Live root cause still requires a new provider
+response; the previous response body cannot be recovered from the screenshot.

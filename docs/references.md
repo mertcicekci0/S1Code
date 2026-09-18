@@ -61,3 +61,9 @@ implementation copied. Official local `claude --version`: 2.1.266. Rechecked off
 Codex App Server managed `account/login/start`/`account/read` documentation. Native
 Claude and handoff process tests use clearly identified local fixtures, not billed
 provider inference or an authenticated Claude Code coding task.
+
+2026-09-19 HTTP failure follow-up: rechecked official
+[Claude API errors](https://platform.claude.com/docs/en/api/errors) and structured
+outputs documentation above. Error fields are `error.type`, `error.message`,
+`request_id`. HTTP 400 alone cannot distinguish request validation from configured
+spend limits. Only bounded, redacted selected fields are displayed; no raw headers.
