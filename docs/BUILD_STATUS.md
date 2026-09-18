@@ -232,3 +232,16 @@ access and deletion scope. A uniquely named dummy credential passed real macOS
 Keychain create/read/update/delete; the dummy record was removed and absence checked.
 No real user credential was read, saved or submitted during implementation. No Rust
 code changed; the preceding Rust verification remains applicable.
+
+## Claude action-schema compatibility follow-up — 2026-09-19
+
+Simplified only the Claude provider wire schema to one action object with nullable
+unused fields; canonical domain actions and policy are unchanged. Strict conversion
+rejects unknown/cross-action arguments and preserves nested null patch hashes.
+This is an experimental compatibility fix, not a confirmed live root-cause claim.
+No-progress protection remains enabled. No new paid request was made. Provider
+outputs/metrics remain private. See ADR 005 for scope and validation limits.
+Validation: 42 offline Rust tests, eight launcher tests, fmt/clippy, release build
+and 228-package license inventory passed. The local HTTP native patch/verification
+integration also passed after its fixtures were updated to include nullable wire
+arguments. A new bounded live task requires explicit spend consent; not run yet.

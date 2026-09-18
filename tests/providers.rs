@@ -519,6 +519,24 @@ async fn claude_http_fixture_drives_native_patch_and_real_verification() {
     let bodies = actions
         .iter()
         .map(|a| {
+            let mut a = a.clone();
+            for field in [
+                "query",
+                "path",
+                "start",
+                "lines",
+                "edits",
+                "argv",
+                "verification",
+                "artifact",
+                "reason",
+                "summary",
+            ] {
+                a.as_object_mut()
+                    .unwrap()
+                    .entry(field)
+                    .or_insert(serde_json::Value::Null);
+            }
             (
                 200,
                 claude_wire(claude_events(

@@ -64,7 +64,78 @@ fn schema() -> Value {
     }
     let mut result = proposal_schema();
     visit(&mut result);
+    // A single object avoids committing to a no-argument union branch before
+    // decoding the discriminator. Domain validation still enforces each action.
+    let variants = result["properties"]["actions"]["items"]["anyOf"]
+        .as_array()
+        .unwrap();
+    let mut properties = serde_json::Map::new();
+    let mut kinds = Vec::new();
+    for variant in variants {
+        for (name, field) in variant["properties"].as_object().unwrap() {
+            if name == "type" {
+                kinds.push(field["enum"][0].clone());
+            } else {
+                properties
+                    .entry(name.clone())
+                    .or_insert_with(|| json!({"anyOf":[field,{"type":"null"}]}));
+            }
+        }
+    }
+    properties.insert("type".into(), json!({"type":"string","enum":kinds}));
+    let required: Vec<_> = properties.keys().cloned().collect();
+    result["properties"]["actions"]["items"] = json!({"type":"object","properties":properties,"required":required,"additionalProperties":false});
     result
+}
+
+fn decode_proposal(text: &str) -> Result<crate::domain::Proposal> {
+    let mut value: Value =
+        serde_json::from_str(text).context("invalid structured Claude proposal")?;
+    if let Some(actions) = value["actions"].as_array_mut() {
+        for action in actions {
+            if let Some(fields) = action.as_object_mut() {
+                // Only unused, known wire fields may be null. Nested before_hash
+                // is left intact: null there means create a new file.
+                fields.retain(|name, value| {
+                    !value.is_null()
+                        || ![
+                            "query",
+                            "path",
+                            "start",
+                            "lines",
+                            "edits",
+                            "argv",
+                            "verification",
+                            "artifact",
+                            "reason",
+                            "summary",
+                        ]
+                        .contains(&name.as_str())
+                });
+            }
+        }
+    }
+    let domain_schema = proposal_schema();
+    if let Some(actions) = value["actions"].as_array() {
+        for action in actions {
+            let variant = domain_schema["properties"]["actions"]["items"]["anyOf"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|v| v["properties"]["type"]["enum"][0] == action["type"])
+                .context("unknown Claude action type")?;
+            let allowed = variant["properties"].as_object().unwrap();
+            ensure!(
+                action
+                    .as_object()
+                    .is_some_and(|fields| fields.keys().all(|k| allowed.contains_key(k))),
+                "Claude supplied arguments for another action type"
+            );
+        }
+    }
+    let proposal = serde_json::from_value(value).context("invalid Claude action arguments")?;
+    validate(&proposal)?;
+    Ok(proposal)
 }
 
 #[derive(Default)]
@@ -202,8 +273,7 @@ impl Message {
     }
     fn finish(self) -> Result<GenerationResult> {
         ensure!(self.stopped, "Claude stream ended without message_stop");
-        let proposal =
-            serde_json::from_str(&self.text).context("invalid structured Claude proposal")?;
+        let proposal = decode_proposal(&self.text)?;
         validate(&proposal)?;
         Ok(GenerationResult {
             proposal,
@@ -222,7 +292,7 @@ impl Generator for Claude {
         deltas: mpsc::UnboundedSender<String>,
     ) -> Result<GenerationResult> {
         ensure!(!cancel.is_cancelled(), "generation cancelled");
-        let body = json!({"model":self.model,"system":INSTRUCTIONS,"messages":[{"role":"user","content":input.to_string()}],"stream":true,"max_tokens":8192,"output_config":{"format":{"type":"json_schema","schema":schema()}}});
+        let body = json!({"model":self.model,"system":format!("{INSTRUCTIONS} Wire format: each action has type plus all argument fields. Populate the fields needed by that type; use null for every unused argument field. Never substitute an argument-free action for a read, search, patch or run."),"messages":[{"role":"user","content":input.to_string()}],"stream":true,"max_tokens":8192,"output_config":{"format":{"type":"json_schema","schema":schema()}}});
         let response = tokio::select! {biased; _=cancel.cancelled()=>bail!("generation cancelled"), r=self.client.post(&self.endpoint).header("x-api-key", &self.key).header("anthropic-version", "2023-06-01").json(&body).send()=>r.context("Claude transport failed")?};
         if !response.status().is_success() {
             let status = response.status();
@@ -296,6 +366,42 @@ fn http_error(status: u16, body: &[u8], key: &str) -> String {
 #[cfg(test)]
 mod error_tests {
     use super::*;
+    #[test]
+    fn flat_wire_actions_recover_exact_arguments_and_reject_cross_type_fields() {
+        let wire = schema();
+        let item = &wire["properties"]["actions"]["items"];
+        assert!(item.get("anyOf").is_none());
+        for action in [
+            json!({"type":"read","path":"parser.py","start":1,"lines":120}),
+            json!({"type":"search","query":"parse_count"}),
+            json!({"type":"patch","edits":[{"path":"new.py","before_hash":null,"content":"pass\n"}]}),
+            json!({"type":"run","argv":["python3","-m","unittest"],"verification":true}),
+            json!({"type":"list"}),
+        ] {
+            let mut padded = action.clone();
+            for name in item["properties"].as_object().unwrap().keys() {
+                padded
+                    .as_object_mut()
+                    .unwrap()
+                    .entry(name)
+                    .or_insert(Value::Null);
+            }
+            let decoded =
+                decode_proposal(&json!({"message":"Inspect","actions":[padded]}).to_string())
+                    .unwrap();
+            assert_eq!(serde_json::to_value(&decoded.actions[0]).unwrap(), action);
+        }
+        for action in [
+            json!({"type":"read","path":"parser.py","start":null,"lines":10}),
+            json!({"type":"list","path":"parser.py"}),
+            json!({"type":"list","invented":null}),
+        ] {
+            assert!(
+                decode_proposal(&json!({"message":"Inspect","actions":[action]}).to_string())
+                    .is_err()
+            );
+        }
+    }
     #[test]
     fn http_errors_preserve_cause_without_keys_headers_or_terminal_controls() {
         let body = json!({"error":{"type":"invalid_request_error","message":"credit balance too low. fixture-private-key sk-ant-api-fixture \u{1b}[31m"},"request_id":"req_fixture","headers":{"authorization":"never-display-this"}});
