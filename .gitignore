@@ -1,0 +1,11 @@
+/target/
+/.nerve/
+/eval-results/
+/private/
+*.env
+.env*
+!*.env.example
+*.log
+__pycache__/
+*.pyc
+
