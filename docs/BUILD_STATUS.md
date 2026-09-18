@@ -148,3 +148,26 @@ credentials and execution/request-budget consent. Keep results private.
   formatting, clippy with warnings denied, release build and 228 dependency license
   checks passed. No new dependencies were added. Four live tests remain opt-in;
   no billed Claude/OpenAI/Jev or managed coding task was run in this follow-up.
+
+## Conversation follow-up — 2026-09-19
+
+- Conversation is the default task view; wrapped replies are retained, protocol
+  events and four technical tabs move behind F2. Approvals and patch review remain
+  visible. Native tasks still use bounded runs, not an ongoing chat loop.
+- Codex interactive responses accept another message in the same thread and App
+  Server process. Every submitted message is a separately counted delegation.
+  Closing and resuming observes the saved turn without resubmitting it. Responses
+  without verification are awaiting_input, never reported as verified completion.
+- Corrected stream-tail labeling so command/file output cannot become assistant
+  dialogue. Full diagnostic events remain recorded. Wall time includes user input
+  and approval waits; upstream inference latency/usage remain unknown.
+- Added OFFLINE protocol/PTY smoke test for two turns, runtime/thread reuse and
+  resume without duplicate execution. Added default-view/narrow-layout regression
+  test. Ratatui's pinned rendered-line-info feature computes wrapped scroll limits.
+- Hidden-input live launcher prepares builds without keys and requests a concrete
+  request budget before collecting credentials. No keys from chat were stored or
+  used. Live checks, paid coding runs and comparative efficiency remain unverified.
+- Verification for this follow-up: 38 offline Rust tests, fmt, clippy (`-D warnings`),
+  release build and 228-package license inventory passed. All four PTY/headless smoke
+  scripts passed, including `python3 scripts/conversation_smoke.py`. Launcher help
+  and key-isolated child environments were checked without provider requests.

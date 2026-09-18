@@ -43,7 +43,12 @@ as uncertain. Inspect the trace and workspace first, then use
 `s1code resume ID --acknowledge-interruption` to explicitly clear uncertain intent.
 Recovery refuses to overwrite subsequent user edits.
 
-Terminal keys: `1` activity, `2` candidates/selection, `3` context, `4` diff;
+The default task screen shows conversation, not protocol events. `F2` toggles the
+inspector. In a Codex conversation, type a follow-up and press Enter after a response;
+Esc closes it without submitting another turn. Interactive resume waits for input.
+Native runs finish after their bounded task.
+
+Inspector keys: `1` activity, `2` candidates/selection, `3` context, `4` diff;
 `↑`/`↓` select events, `Enter` expand/collapse, `PgUp`/`PgDn` scroll,
 `y`/`n` approve/deny, `Esc` or `Ctrl-C` cancel. After a run stops, press `q` to close
 and leave a copyable summary in the normal terminal.

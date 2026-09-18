@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 pub enum RunStatus {
     Running,
     AwaitingApproval,
+    AwaitingInput,
     Blocked,
     Cancelled,
     Failed,
@@ -244,6 +245,8 @@ pub struct RunEvent {
 
 #[derive(Clone, Debug)]
 pub enum UiInput {
+    Message(String),
+    Close,
     Approve(String),
     Deny(String),
 }

@@ -39,9 +39,12 @@ is the explicitly labeled Codex bridge with managed ChatGPT login; `/login` star
 its official login flow. `F2` cycles providers. `/provider claude` selects native
 Claude API generation, `/jev openrouter` enables Jev decisions in native mode,
 `/sessions` lists saved tasks, and `/help` explains setup. Keys are read from the
-environment, never from chat messages. Closing a task view returns to task entry;
-each new prompt starts an independent saved task rather than silently inheriting
-another task's permissions or context. Use `/resume ID` for existing work.
+environment, never from chat messages. Codex responses return to a message field on
+the same thread; Enter sends the next turn and Esc closes the conversation.
+F2 inside a task opens the activity/decision/context/diff inspector. Protocol events
+are hidden from the default conversation. Closing returns home; a new home prompt
+starts an independent saved task. Native tasks remain bounded runs; use `/resume ID`
+for existing work.
 
 `/claude-code` (or `s1code claude-code`) opens the installed, unmodified official
 Claude Code terminal. That application owns login, permissions, tools and history;

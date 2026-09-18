@@ -306,6 +306,11 @@ fn visible_message(raw: &str) -> String {
 
 #[derive(Default)]
 struct Screen {
+    inspect: bool,
+    conversation: VecDeque<String>,
+    awaiting_input: bool,
+    closing: bool,
+    editor: crate::home::Editor,
     entries: VecDeque<RunEvent>,
     selected: usize,
     list: ListState,
@@ -326,6 +331,20 @@ struct Screen {
     done: bool,
 }
 impl Screen {
+    fn message(&mut self, role: &str, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        self.conversation.push_back(format!(
+            "{role}
+{text}
+"
+        ));
+        while self.conversation.len() > 100 {
+            self.conversation.pop_front();
+        }
+        self.scroll = 0;
+    }
     fn answer_approval(&mut self, approve: bool) -> Option<UiInput> {
         let event = self.pending.take()?;
         let id = string(&event.data["candidate"], "id").to_owned();
@@ -341,6 +360,8 @@ impl Screen {
         match e.kind.as_str() {
             "started" | "delegation_started" => {
                 self.task = string(v, "task").into();
+                self.message("You", string(v, "task"));
+                self.awaiting_input = false;
                 self.status = "Working".into();
             }
             "stream" => {
@@ -349,7 +370,22 @@ impl Screen {
                 self.upstream_stream = false;
                 return;
             }
-            "proposal" => self.stream.clear(),
+            "proposal" => {
+                self.message("Assistant", string(v, "message"));
+                self.stream.clear();
+            }
+            "input_ready" => {
+                self.awaiting_input = true;
+                self.status = "Your turn".into();
+            }
+            "conversation_history" => {
+                if let Some(messages) = v["messages"].as_array() {
+                    for m in messages {
+                        self.message(string(m, "role"), string(m, "text"));
+                    }
+                }
+            }
+            "error" | "tool_error" => self.message("Error", &details(&e)),
             "candidates" => self.candidates = v.clone(),
             "selection" => self.selection = v.clone(),
             "tool_result" => {
@@ -393,10 +429,12 @@ impl Screen {
                 }
                 .into();
                 self.expanded = false;
+                self.tab = 0;
                 self.scroll = 0;
             }
             "summary" => {
                 self.status = readable_status(string(v, "status"));
+                self.message("Result", &summary_text(v));
                 self.summary = Some(e.clone());
                 self.pending = None;
                 self.tab = 0;
@@ -405,6 +443,14 @@ impl Screen {
                 self.scroll = 0;
             }
             "upstream" => {
+                if v["method"] == "item/completed" && v["params"]["item"]["type"] == "agentMessage"
+                {
+                    self.message("Assistant", string(&v["params"]["item"], "text"));
+                    self.stream.clear();
+                }
+                if v["method"] == "error" {
+                    self.message("Error", &upstream_text(v));
+                }
                 if v["method"] == "item/agentMessage/delta" {
                     self.stream.push_str(string(&v["params"], "delta"));
                     self.stream = crate::tools::bound(&self.stream, 32_000);
@@ -441,8 +487,8 @@ impl Screen {
     fn draw(&mut self, f: &mut Frame, label: &str) {
         let pending_h = if self.pending.is_some() { 5 } else { 0 };
         let rows = Layout::vertical([
-            Constraint::Length(4),
             Constraint::Length(2),
+            Constraint::Length(if self.inspect { 2 } else { 0 }),
             Constraint::Length(pending_h),
             Constraint::Min(1),
             Constraint::Length(3),
@@ -468,11 +514,6 @@ impl Screen {
                 ),
             ]),
             Line::styled(label, Style::default().fg(MUTED)),
-            Line::raw(if self.task.is_empty() {
-                "".into()
-            } else {
-                format!("Task: {}", self.task)
-            }),
         ]);
         f.render_widget(Paragraph::new(header).wrap(Wrap { trim: false }), rows[0]);
         f.render_widget(
@@ -497,7 +538,33 @@ impl Screen {
             );
         }
         let body = rows[3];
-        if self.tab == 0 && !self.expanded && !self.raw {
+        if !self.inspect && self.tab != 3 && !self.raw {
+            let mut text = self.conversation.iter().cloned().collect::<Vec<_>>().join(
+                "
+",
+            );
+            if !self.stream.is_empty() {
+                let streaming = if self.upstream_stream {
+                    self.stream.clone()
+                } else {
+                    visible_message(&self.stream)
+                };
+                text.push_str(&format!(
+                    "
+Assistant
+{streaming}"
+                ));
+            }
+            if text.is_empty() {
+                text = "Connecting…".into();
+            }
+            let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
+            let end = paragraph
+                .line_count(body.width)
+                .saturating_sub(body.height as usize)
+                .min(u16::MAX as usize) as u16;
+            f.render_widget(paragraph.scroll((end.saturating_sub(self.scroll), 0)), body);
+        } else if self.tab == 0 && !self.expanded && !self.raw {
             let areas = Layout::vertical([
                 Constraint::Min(1),
                 Constraint::Length(if self.stream.is_empty() { 0 } else { 5 }),
@@ -619,10 +686,17 @@ impl Screen {
                 body,
             );
         }
-        let footer = if self.done {
-            "q Close · 1–4 Views · Enter Details · j Raw event\nPgUp/PgDn Scroll · text remains copyable"
+        let input_text;
+        let footer = if self.awaiting_input {
+            input_text = format!(
+                "> {}▏\nEnter Send · Esc Close · F2 Inspect",
+                self.editor.text.iter().collect::<String>()
+            );
+            &input_text
+        } else if self.done {
+            "q Close · F2 Inspect · 1–4 Views\nPgUp/PgDn Scroll · text remains copyable"
         } else {
-            "1–4 Views · ↑↓ Select · Enter Details · j Raw\nPgUp/PgDn Scroll · Esc / Ctrl-C Cancel"
+            "F2 Inspect · 1–4 Views · Enter Details\nPgUp/PgDn Scroll · Esc / Ctrl-C Cancel"
         };
         f.render_widget(
             Paragraph::new(footer)
@@ -642,25 +716,45 @@ pub async fn terminal(
 ) -> Result<Option<RunEvent>> {
     enable_raw_mode()?;
     let _restore = Restore;
-    execute!(io::stdout(), EnterAlternateScreen)?;
+    execute!(
+        io::stdout(),
+        EnterAlternateScreen,
+        crossterm::event::EnableBracketedPaste
+    )?;
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     let mut keys = EventStream::new();
     let mut screen = Screen::default();
     loop {
         terminal.draw(|f| screen.draw(f, &label))?;
         tokio::select! {
-            event=events.recv(),if !screen.done=>match event{Some(e)=>screen.receive(e),None=>screen.done=true},
-            key=keys.next()=>if let Some(Ok(Event::Key(key)))=key {if key.kind!=KeyEventKind::Press{continue;}match key.code {
+            event=events.recv(),if !screen.done=>match event{Some(e)=>screen.receive(e),None=>{screen.done=true;if screen.closing { break; }}},
+            key=keys.next()=>if let Some(Ok(event))=key {
+                if let Event::Paste(text) = &event { if screen.awaiting_input { screen.editor.insert(text); } continue; }
+                let Event::Key(key) = event else { continue; };
+                if key.kind!=KeyEventKind::Press{continue;}
+                if key.code == KeyCode::F(2) { screen.inspect = !screen.inspect; screen.tab=0; screen.raw=false; continue; }
+                if screen.awaiting_input && !screen.inspect {
+                    match key.code {
+                        KeyCode::Esc => { let _=input.send(UiInput::Close); screen.awaiting_input=false; screen.closing=true; }
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => { let _=input.send(UiInput::Close); screen.awaiting_input=false; screen.closing=true; }
+                        KeyCode::Enter => { let text=screen.editor.take(); if !text.trim().is_empty() { if text.trim()=="/exit" { let _=input.send(UiInput::Close); screen.closing=true; } else { let _=input.send(UiInput::Message(text)); } screen.awaiting_input=false; } }
+                        KeyCode::PageUp => screen.scroll=screen.scroll.saturating_add(10),
+                        KeyCode::PageDown => screen.scroll=screen.scroll.saturating_sub(10),
+                        _ => screen.editor.key(key.code),
+                    }
+                    continue;
+                }
+                match key.code {
                 KeyCode::Esc|KeyCode::Char('q')=>{if screen.done{break;}cancel.cancel();screen.status="Cancelling; waiting for cleanup".into();},
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL)=>{if screen.done{break;}cancel.cancel();screen.status="Cancelling; waiting for cleanup".into();},
                 KeyCode::Char('y')|KeyCode::Char('n')=>{if let Some(msg)=screen.answer_approval(key.code==KeyCode::Char('y')) {let _=input.send(msg);}},
-                KeyCode::Char(c @ '1'..='4')=>{screen.tab=(c as u8-b'1')as usize;screen.raw=false;screen.scroll=0;},
+                KeyCode::Char(c @ '1'..='4')=>{screen.inspect=true;screen.tab=(c as u8-b'1')as usize;screen.raw=false;screen.scroll=0;},
                 KeyCode::Up=>{screen.selected=screen.selected.saturating_sub(1);screen.scroll=0;},
                 KeyCode::Down=>{screen.selected=(screen.selected+1).min(screen.entries.len().saturating_sub(1));screen.scroll=0;},
                 KeyCode::Enter=>{screen.expanded = !screen.expanded;screen.raw=false;screen.scroll=0;},
                 KeyCode::Char('j')=>{screen.raw = !screen.raw;screen.scroll=0;},
-                KeyCode::PageDown=>screen.scroll=screen.scroll.saturating_add(10),
-                KeyCode::PageUp=>screen.scroll=screen.scroll.saturating_sub(10),
+                KeyCode::PageDown=>{screen.scroll=if screen.inspect || screen.tab==3 {screen.scroll.saturating_add(10)} else {screen.scroll.saturating_sub(10)};},
+                KeyCode::PageUp=>{screen.scroll=if screen.inspect || screen.tab==3 {screen.scroll.saturating_sub(10)} else {screen.scroll.saturating_add(10)};},
                 KeyCode::Home=>screen.scroll=0,
                 _=>{}
             }}
@@ -694,6 +788,39 @@ mod tests {
             .map(|row| row.iter().map(|c| c.symbol()).collect::<String>())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+    #[test]
+    fn conversation_hides_protocol_and_keeps_full_wrapped_reply() {
+        let mut screen = Screen::default();
+        screen.receive(event("delegation_started", json!({"task":"hello"})));
+        screen.receive(event("bridge_connected", json!({})));
+        screen.receive(event(
+            "upstream",
+            json!({"method":"thread/started","params":{}}),
+        ));
+        let reply = format!("{} the final words survive", "A useful answer. ".repeat(14));
+        screen.receive(event("upstream", json!({"method":"item/completed","params":{"item":{"type":"agentMessage","text":reply}}})));
+        screen.receive(event("input_ready", json!({})));
+        for width in [50, 110] {
+            let text = render(&mut screen, width);
+            assert!(
+                text.contains("Your turn")
+                    && text
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                        .contains("final words survive"),
+                "{text}"
+            );
+            assert!(
+                !text.contains("thread")
+                    && !text.contains("bridge connected")
+                    && !text.contains("1 Activity")
+            );
+            assert!(text.contains("Enter Send"));
+        }
+        screen.inspect = true;
+        assert!(render(&mut screen, 110).contains("1 Activity"));
     }
     #[test]
     fn approval_is_readable_at_narrow_and_wide_sizes() {

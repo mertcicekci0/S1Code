@@ -198,12 +198,12 @@ pub fn interpret(line: &str, settings: &mut Settings) -> Result<Option<Command>>
 }
 
 #[derive(Default)]
-struct Editor {
-    text: Vec<char>,
+pub(crate) struct Editor {
+    pub(crate) text: Vec<char>,
     cursor: usize,
 }
 impl Editor {
-    fn insert(&mut self, text: &str) {
+    pub(crate) fn insert(&mut self, text: &str) {
         for c in text
             .chars()
             .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
@@ -216,7 +216,7 @@ impl Editor {
             self.cursor += 1;
         }
     }
-    fn key(&mut self, code: KeyCode) {
+    pub(crate) fn key(&mut self, code: KeyCode) {
         match code {
             KeyCode::Char(c) => self.insert(&c.to_string()),
             KeyCode::Backspace if self.cursor > 0 => {
@@ -233,7 +233,7 @@ impl Editor {
             _ => {}
         }
     }
-    fn take(&mut self) -> String {
+    pub(crate) fn take(&mut self) -> String {
         self.cursor = 0;
         self.text.drain(..).collect()
     }

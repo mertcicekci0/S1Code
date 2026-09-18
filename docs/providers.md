@@ -165,8 +165,12 @@ only an identical reply; changed arguments are rejected. Unknown client requests
 are rejected and permission-extension requests receive no grants. Headless bridge
 approvals are denied; use the terminal for interactive approval. Saved turns are
 observed on resume and are never blindly resubmitted. Active turns can be reattached;
-a stopped turn requires explicit `resume ID --continue-task` to request another
-turn on the same thread. Native request budgets cannot bound hidden upstream
+an interactive stopped turn waits for a new message, and Enter explicitly requests
+one additional turn on the same thread. Headless continuation requires explicit
+`resume ID --continue-task`. Interactive follow-ups reuse one App Server process;
+resuming a closed conversation starts a new process and resumes the saved thread.
+A completed upstream response without an observed check is `awaiting_input`, not
+verified task completion. Native request budgets cannot bound hidden upstream
 inference; the bridge currently delegates one turn at a time. Internal calls/token counts
 are unknown; a turn is a delegation, not one model call. Completion reporting only
 notes observed upstream verification evidence, not proof of task correctness.
@@ -200,3 +204,15 @@ mode where Jev replaces Codex or Claude Code's internal action selection.
 No credential scraping, copied OAuth clients, third-party Claude.ai login, or
 Gemini/Copilot OAuth adapter exists. Cloud-native Claude API authentication is not
 implemented; this release's native Claude adapter uses ANTHROPIC_API_KEY.
+
+## Local hidden-key live launcher
+
+From the source directory, run `python3 scripts/try_live.py check` for at most one
+Claude request and one OpenRouter Jev request, or `python3 scripts/try_live.py task`
+for a fresh parser task capped at eight total provider requests including retries.
+The launcher builds before asking for keys, asks for explicit request-budget consent,
+then reads keys without echo in your local terminal. It does not save them or send
+them to Cargo/build scripts. A request cap is not a dollar cap. Set provider credit
+limits separately. Task sessions remain in the printed private temporary directory;
+keep Jev measurements private. These commands were prepared and tested offline;
+live provider validation remains unverified until you run them successfully.
