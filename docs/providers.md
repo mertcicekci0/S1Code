@@ -25,7 +25,7 @@ Choose `--provider claude` (or `/provider claude` on the home screen) and set
 contract as OpenAI; it executes no tools. There is no hidden Claude Code runtime
 in this mode. Jev works with either native generation provider.
 
-The configurable default is `claude-sonnet-5`, listed in the official model docs
+The configurable default is `claude-opus-5`, listed in the official model docs
 reviewed on 2026-09-19. Account availability and billed inference are unverified.
 The adapter checks message/block ordering, fragmented UTF-8/SSE, final stop reason,
 structured proposals, bounded output and cancellation. Refusal, truncated output,
@@ -224,3 +224,10 @@ preview. TypeSafe secrets may start with `apikey_`; the launcher does not confus
 them with Anthropic key IDs. To explicitly select the gateway instead, append
 `--jev-provider openrouter` and enter its separate credential. Existing sessions
 retain their original provider; the route is never silently changed on resume.
+
+New native Claude runs now default to Opus 5. The launcher accepts `--model
+claude-opus-5` for either `check` or `task`, and passes the same selection to the
+actual generation adapter. The selected model is displayed before budget consent.
+Existing sessions retain their original model. Changing the model is experimental;
+it does not establish better task success, latency or cost. The eight-request task
+cap remains unchanged and is not a dollar cap.

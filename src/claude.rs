@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-pub const DEFAULT_MODEL: &str = "claude-sonnet-5";
+pub const DEFAULT_MODEL: &str = "claude-opus-5";
 
 pub struct Claude {
     client: reqwest::Client,

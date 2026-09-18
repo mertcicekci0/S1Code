@@ -55,6 +55,7 @@ def main():
     parser.add_argument('mode', choices=['check', 'jev-check', 'task'], nargs='?', default='check')
     parser.add_argument('--jev-provider', choices=['typesafe', 'openrouter'], default='typesafe',
                         help='Jev credential issuer and endpoint (default: official TypeSafe)')
+    parser.add_argument('--model', default='claude-opus-5', help='Claude generation model (default: claude-opus-5)')
     args = parser.parse_args()
     jev_name, jev_env, jev_test = {
         'typesafe': ('TypeSafe / official Jev', 'TYPESAFE_API_KEY', 'jev_live_contract'),
@@ -63,6 +64,8 @@ def main():
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         raise RuntimeError('Use your local interactive terminal; keys must not enter chat or a pipe.')
     environment = base_environment()
+    if args.mode != "jev-check":
+        print(f"Claude generation model: {args.model}")
     if args.mode in ['check', 'jev-check']:
         executable = prepare_checks(environment)
         budget = 1 if args.mode == 'jev-check' else 2
@@ -91,8 +94,11 @@ def main():
         checks = [] if anthropic is None else [('ANTHROPIC_API_KEY', anthropic, 'claude_live_contract')]
         checks.append((jev_env, jev_secret, jev_test))
         for name, secret, test in checks:
+            test_env = check_environment(environment, name, secret)
+            if name == 'ANTHROPIC_API_KEY':
+                test_env['S1CODE_LIVE_CLAUDE_MODEL'] = args.model
             result = subprocess.run([executable, test, '--exact', '--ignored', '--test-threads=1'],
-                                    cwd=ROOT, env=check_environment(environment, name, secret))
+                                    cwd=ROOT, env=test_env)
             if result.returncode:
                 print('Live check failed. Stopped; no automatic retry or other-provider fallback.')
                 return result.returncode
@@ -111,7 +117,7 @@ def main():
     return subprocess.run([
         executable, '--home', str(directory / 'data'), 'run',
         'Fix parse_count for whole signed integers, blanks and invalid text; run tests.',
-        '--workspace', str(workspace), '--provider', 'claude', '--decision', 'jev',
+        '--workspace', str(workspace), '--provider', 'claude', '--model', args.model, '--decision', 'jev',
         '--jev-provider', args.jev_provider, '--max-provider-requests', '8', '--max-generations', '6',
     ], env=run_env).returncode
 

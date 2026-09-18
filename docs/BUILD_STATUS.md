@@ -200,3 +200,17 @@ No live TypeSafe request was executed here; user key is not installed or persist
 Validation for the route change: four Python launcher tests and six Rust library
 tests passed; formatting, all-target clippy and release build passed. The existing
 full 40-test Rust suite last passed in the immediately preceding diagnostics change.
+
+## Opus selection and visible stop reasons — 2026-09-19
+
+New Claude sessions and the live launcher default to claude-opus-5 at user request;
+`--model` explicitly overrides the launcher model for both check and task. Existing
+sessions retain their model. Rechecked the official model catalog. No live Opus
+request or successful Opus task has been verified. No comparative claim is made.
+The conversation now shows no-progress and blocked reasons without opening the
+inspector. Generation instructions include concrete read/search examples and require
+proposed actions to match the visible plan; runtime permissions remain authoritative.
+The unchanged no-progress guard still stops repeated planning without fresh evidence.
+Validation: 41 offline Rust tests, five launcher tests, fmt, clippy, release build
+and the 228-package license inventory passed. Provider-restricted live traces remain
+private and were not added to git or exported.

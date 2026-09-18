@@ -105,7 +105,7 @@ s1code run "fix the failing parser test" --provider claude \
 ```
 
 The Claude adapter uses the public streaming Messages API with structured proposals.
-The default model is `claude-sonnet-5`; `--model` selects an explicit model. Local
+The default model is `claude-opus-5`; `--model` selects an explicit model. Local
 HTTP fixtures pass, including a real approved patch/test cycle. Billed Claude
 inference has not been verified. Claude subscription tokens are never imported.
 

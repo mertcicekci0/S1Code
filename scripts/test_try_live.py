@@ -44,6 +44,12 @@ class LauncherTests(unittest.TestCase):
         self.assertNotIn('ANTHROPIC_API_KEY', calls[1].kwargs['env'])
         self.assertNotIn('TYPESAFE_API_KEY', calls[1].kwargs['env'])
 
+    def test_claude_check_receives_selected_model_only(self):
+        for arguments, model in [(['check'], 'claude-opus-5'), (['check', '--model', 'claude-sonnet-5'], 'claude-sonnet-5')]:
+            calls, _ = self.run_check(arguments, ['sk-ant-api-fixture', 'apikey_fixture'], 'RUN 2')
+            self.assertEqual(calls[0].kwargs['env']['S1CODE_LIVE_CLAUDE_MODEL'], model)
+            self.assertNotIn('S1CODE_LIVE_CLAUDE_MODEL', calls[1].kwargs['env'])
+
     def test_no_consent_means_no_secrets_or_requests(self):
         calls, prompts = self.run_check(['jev-check'], [], '')
         self.assertEqual((len(calls), prompts), (0, 0))

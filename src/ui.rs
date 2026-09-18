@@ -386,6 +386,8 @@ impl Screen {
                 }
             }
             "error" | "tool_error" => self.message("Error", &details(&e)),
+            "no_progress" => self.message("Stopped", string(v, "message")),
+            "blocked" => self.message("Blocked", string(v, "reason")),
             "candidates" => self.candidates = v.clone(),
             "selection" => self.selection = v.clone(),
             "tool_result" => {
@@ -821,6 +823,20 @@ mod tests {
         }
         screen.inspect = true;
         assert!(render(&mut screen, 110).contains("1 Activity"));
+    }
+    #[test]
+    fn stop_reason_is_visible_without_inspector() {
+        let mut screen = Screen::default();
+        screen.receive(event(
+            "no_progress",
+            json!({"message":"Repeated action without new evidence."}),
+        ));
+        assert!(render(&mut screen, 80).contains("Repeated action without new evidence."));
+        screen.receive(event(
+            "blocked",
+            json!({"reason":"Required tool unavailable."}),
+        ));
+        assert!(render(&mut screen, 80).contains("Required tool unavailable."));
     }
     #[test]
     fn approval_is_readable_at_narrow_and_wide_sizes() {
