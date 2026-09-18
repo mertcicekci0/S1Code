@@ -1,4 +1,4 @@
-use nerve::{
+use s1code::{
     bridge::{ApprovalLedger, Rpc, approval_policy, validate_permissions},
     context,
     domain::*,
@@ -82,7 +82,7 @@ fn single_workspace_writer_across_homes_and_unknown_action_restart() {
     let (store, mut s) =
         Store::create(h1.path(), root.path(), "task".into(), Default::default()).unwrap();
     assert!(Store::create(h2.path(), root.path(), "other".into(), Default::default()).is_err());
-    s.inflight = Some(nerve::policy::candidate(
+    s.inflight = Some(s1code::policy::candidate(
         Action::Run {
             argv: vec!["python3".into(), "-m".into(), "unittest".into()],
             verification: true,
@@ -353,7 +353,7 @@ fn eviction_and_rehydration_preserve_transitive_dependencies() {
 
 #[test]
 fn approvals_cannot_be_reclassified_and_orphan_results_are_unrepresentable() {
-    let mut c = nerve::policy::candidate(
+    let mut c = s1code::policy::candidate(
         Action::Run {
             argv: vec!["python3".into(), "-m".into(), "unittest".into()],
             verification: true,
@@ -363,7 +363,7 @@ fn approvals_cannot_be_reclassified_and_orphan_results_are_unrepresentable() {
         vec![],
     );
     c.class = PolicyClass::Allow;
-    assert!(nerve::policy::revalidate(&c, "revision").is_err());
+    assert!(s1code::policy::revalidate(&c, "revision").is_err());
     assert!(serde_json::from_value::<ContextItem>(json!({"artifact":{"hash":"x","bytes":1,"origin":"test","call_id":"call","revision":"r","dependencies":[]},"pinned":false,"evicted":false,"diagnostic":false})).is_err());
 }
 
@@ -421,4 +421,31 @@ fn journal_ahead_of_checkpoint_requires_recovery_and_partial_tail_is_rejected() 
         .unwrap();
     f.write_all(b"{partial").unwrap();
     assert!(Store::resume(home.path(), &s.id).is_err());
+}
+
+#[test]
+fn renamed_brand_preserves_existing_store_without_merging() {
+    let root = tempfile::tempdir().unwrap();
+    let current = root.path().join("s1code");
+    let legacy = root.path().join("nerve");
+    assert_eq!(
+        s1code::session::select_home(current.clone(), legacy.clone()),
+        current
+    );
+    std::fs::create_dir_all(legacy.join("sessions")).unwrap();
+    assert_eq!(
+        s1code::session::select_home(current.clone(), legacy.clone()),
+        legacy
+    );
+    std::fs::create_dir(&current).unwrap();
+    assert_eq!(
+        s1code::session::select_home(current.clone(), legacy),
+        current
+    );
+    let mut config = serde_json::to_value(RunConfig::default()).unwrap();
+    config
+        .as_object_mut()
+        .unwrap()
+        .remove("generation_provider");
+    assert!(serde_json::from_value::<RunConfig>(config).is_ok());
 }

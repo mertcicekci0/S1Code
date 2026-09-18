@@ -1,18 +1,18 @@
-# Nerve
+# S1Code
 
 A Rust terminal coding agent with concrete candidate actions, deterministic policy,
-and recoverable context. **Experimental v0, built from source.** Nerve is a working
+and recoverable context. **Experimental v0, built from source.** S1Code is a working
 name; naming availability and trademark clearance have not been established.
 
 Native mode owns the coding loop. A generation provider proposes plans and complete
-next actions; rules or Jev select among candidates; Nerve validates, requests
+next actions; rules or Jev select among candidates; S1Code validates, requests
 approval, executes, and records evidence. Context eviction retains the captured
 bytes for exact rehydration. This does not guarantee retained understanding or
 better task performance.
 
 The separate **Codex bridge** delegates execution to the official local Codex App
 Server using its managed ChatGPT login. Its internal turns and context are outside
-Nerve's control. Jev has separate credentials and billing.
+S1Code's control. Jev has separate credentials and billing.
 
 ## Install from source
 
@@ -23,7 +23,7 @@ but has not been observed running in this build session.
 ```sh
 cargo build --locked --release
 cargo install --path . --locked
-nerve doctor
+s1code doctor
 ```
 
 There is no published package or downloadable release advertised here.
@@ -31,7 +31,7 @@ There is no published package or downloadable release advertised here.
 ## Try the actual tools offline
 
 ```sh
-nerve demo --offline --workspace /tmp/nerve-parser-demo
+s1code demo --offline --workspace /tmp/s1code-parser-demo
 ```
 
 The destination must be empty. The UI remains labeled **OFFLINE SIMULATION**:
@@ -40,9 +40,9 @@ patch application, failing/passing tests, and persistence are real. Press `y` to
 approve the displayed action, `1`–`4` to inspect views, and `Esc` to cancel.
 
 ```sh
-nerve context-demo --workspace /tmp/nerve-context-demo
-nerve sessions
-nerve resume <session-id>
+s1code context-demo --workspace /tmp/s1code-context-demo
+s1code sessions
+s1code resume <session-id>
 ```
 
 The context demo performs real reads, eviction, and exact rehydration with no model.
@@ -55,8 +55,8 @@ or project files. The default generation model is `gpt-4.1-2025-04-14`; use `--m
 to select a Responses model supporting streaming structured output.
 
 ```sh
-nerve run "fix the failing parser test" --mode native
-nerve run "fix the failing parser test" --decision jev --max-provider-requests 12
+s1code run "fix the failing parser test" --mode native
+s1code run "fix the failing parser test" --decision jev --max-provider-requests 12
 ```
 
 Jev additionally needs `TYPESAFE_API_KEY`. It uses pinned `jev-1.13.0`. Native API
@@ -76,15 +76,15 @@ filesystem/network access. Use trusted repositories or your own sandbox.
 ## Headless and delegated modes
 
 ```sh
-nerve run "fix the failing parser test" --headless
-nerve resume <session-id> --headless --approve <exact-candidate-id>
-nerve login codex
-nerve account codex
-nerve run "fix the failing parser test" --mode codex
+s1code run "fix the failing parser test" --headless
+s1code resume <session-id> --headless --approve <exact-candidate-id>
+s1code login codex
+s1code account codex
+s1code run "fix the failing parser test" --mode codex
 ```
 
 Headless stdout is JSONL. Native runs pause durably at approvals. The Codex bridge
-uses the official CLI's credentials; Nerve never reads token files. Consult
+uses the official CLI's credentials; S1Code never reads token files. Consult
 [provider setup and mode boundaries](docs/providers.md) for compatibility and the
 bridge's different approval/resume behavior.
 
@@ -94,8 +94,8 @@ bridge's different approval/resume behavior.
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test --locked
-nerve eval --suite fixtures/core
-nerve eval --suite fixtures/heldout --output eval-results/heldout
+s1code eval --suite fixtures/core
+s1code eval --suite fixtures/heldout --output eval-results/heldout
 ```
 
 Default evaluation validates the fixtures and reference patches, **not agent

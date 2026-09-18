@@ -71,7 +71,7 @@ async fn hidden_check(
 ) -> Result<bool> {
     let checker = control.join("check.py");
     let script = format!(
-        "import sys\nsys.path.insert(0,sys.argv[1])\n{checks}\nprint('NERVE_EVALUATOR_CHECKS_PASSED')\n"
+        "import sys\nsys.path.insert(0,sys.argv[1])\n{checks}\nprint('S1CODE_EVALUATOR_CHECKS_PASSED')\n"
     );
     atomic_write(&checker, script.as_bytes())?;
     let result = process(
@@ -86,7 +86,7 @@ async fn hidden_check(
         Duration::from_secs(15),
     )
     .await?;
-    Ok(result.exit_code == Some(0) && result.text.contains("NERVE_EVALUATOR_CHECKS_PASSED"))
+    Ok(result.exit_code == Some(0) && result.text.contains("S1CODE_EVALUATOR_CHECKS_PASSED"))
 }
 
 pub async fn evaluate(

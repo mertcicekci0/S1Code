@@ -1,5 +1,5 @@
 //! Explicit integration checks; ignored by default. Never print provider responses.
-use nerve::{
+use s1code::{
     bridge,
     decisions::{Jev, Question},
     domain::Metrics,
@@ -30,9 +30,9 @@ async fn codex_local_protocol() {
 }
 
 #[tokio::test]
-#[ignore = "billed Jev request; requires TYPESAFE_API_KEY and explicit NERVE_LIVE_BUDGET_REQUESTS"]
+#[ignore = "billed Jev request; requires TYPESAFE_API_KEY and explicit S1CODE_LIVE_BUDGET_REQUESTS"]
 async fn jev_live_contract() {
-    let budget = std::env::var("NERVE_LIVE_BUDGET_REQUESTS")
+    let budget = std::env::var("S1CODE_LIVE_BUDGET_REQUESTS")
         .expect("explicit request spend consent required")
         .parse::<u64>()
         .unwrap();
@@ -78,16 +78,16 @@ async fn jev_live_contract() {
 }
 
 #[tokio::test]
-#[ignore = "billed OpenRouter decision request; needs OPENROUTER_API_KEY and explicit NERVE_LIVE_BUDGET_REQUESTS"]
+#[ignore = "billed OpenRouter decision request; needs OPENROUTER_API_KEY and explicit S1CODE_LIVE_BUDGET_REQUESTS"]
 async fn openrouter_live_contract() {
-    let budget = std::env::var("NERVE_LIVE_BUDGET_REQUESTS")
+    let budget = std::env::var("S1CODE_LIVE_BUDGET_REQUESTS")
         .expect("explicit request spend consent required")
         .parse::<u64>()
         .unwrap();
     assert!(budget > 0);
-    let config = nerve::domain::RunConfig {
+    let config = s1code::domain::RunConfig {
         jev_provider: "openrouter".into(),
-        jev_model: nerve::decisions::OPENROUTER_MODEL.into(),
+        jev_model: s1code::decisions::OPENROUTER_MODEL.into(),
         ..Default::default()
     };
     let mut adapter = Jev::from_config(&config).unwrap();

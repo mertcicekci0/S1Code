@@ -1,6 +1,6 @@
 # Evaluation methodology
 
-`nerve eval --suite fixtures/core` is offline evaluator validation. It copies only
+`s1code eval --suite fixtures/core` is offline evaluator validation. It copies only
 agent-visible starting files into a disposable workspace, runs independently stored
 checks to confirm the task initially fails, applies the reference patch through the
 real patch validator, and reruns checks. Its result is `fixture_validated_not_agent_success`;
@@ -23,7 +23,7 @@ For billed trials, review provider terms and authorize a bounded number of HTTP
 attempts plus repository code execution:
 
 ```sh
-nerve eval --suite fixtures/core --live --approve-fixture-execution \
+s1code eval --suite fixtures/core --live --approve-fixture-execution \
   --live-budget-requests 120 --decisions rules,jev,generative --repeat 3 \
   --model gpt-4.1-2025-04-14 --eviction conservative \
   --output eval-results/private-comparison
@@ -52,7 +52,7 @@ timing is not agent performance. The bridge reports delegations with internal ca
 unknown, and is not silently substituted for native trials.
 
 Test context eviction separately using identical decision policy/model and changing
-only `--eviction`. `nerve context-demo` verifies real eviction/rehydration mechanics
+only `--eviction`. `s1code context-demo` verifies real eviction/rehydration mechanics
 without a model or scripted scoring answers. Retain task-success evidence alongside
 context size changes and cached token observations; prefix invalidations may cost
 more than eviction saves.

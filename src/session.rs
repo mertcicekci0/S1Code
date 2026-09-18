@@ -47,12 +47,26 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 pub fn default_home() -> Result<PathBuf> {
-    if let Some(s) = std::env::var_os(brand::HOME_ENV) {
+    if let Some(s) =
+        std::env::var_os(brand::HOME_ENV).or_else(|| std::env::var_os(brand::LEGACY_HOME_ENV))
+    {
         return Ok(PathBuf::from(s));
     }
     let dirs = directories::ProjectDirs::from("", "", brand::BIN)
-        .context("Cannot locate data directory; set NERVE_HOME")?;
-    Ok(dirs.data_local_dir().to_path_buf())
+        .context("Cannot locate data directory; set S1CODE_HOME")?;
+    let current = dirs.data_local_dir().to_path_buf();
+    let legacy = directories::ProjectDirs::from("", "", brand::LEGACY_BIN)
+        .context("Cannot locate legacy data directory")?;
+    Ok(select_home(current, legacy.data_local_dir().to_path_buf()))
+}
+
+/// Reuse the existing store in place; never copy a live journal or merge stores.
+pub fn select_home(current: PathBuf, legacy: PathBuf) -> PathBuf {
+    if !current.exists() && legacy.join("sessions").is_dir() {
+        legacy
+    } else {
+        current
+    }
 }
 
 pub struct Store {
@@ -98,9 +112,11 @@ impl Store {
         uuid::Uuid::parse_str(id).context("invalid session id")?;
         private_dir(home)?;
         #[cfg(unix)]
-        let locks = PathBuf::from(format!("/tmp/{}-workspace-locks-{}", brand::BIN, unsafe {
-            libc::geteuid()
-        }));
+        let locks = PathBuf::from(format!(
+            "/tmp/{}-workspace-locks-{}",
+            brand::WORKSPACE_LOCK_NAMESPACE,
+            unsafe { libc::geteuid() }
+        ));
         #[cfg(not(unix))]
         let locks = home.join("locks");
         private_dir(&locks)?;
@@ -111,7 +127,7 @@ impl Store {
             .write(true)
             .open(locks.join(hash(workspace.as_os_str().as_encoded_bytes())))?;
         lock.try_lock_exclusive()
-            .context("Workspace is already owned by another Nerve process")?;
+            .context("Workspace is already owned by another S1Code process")?;
         let dir = home.join("sessions").join(id);
         private_dir(&dir)?;
         private_dir(&dir.join("artifacts"))?;

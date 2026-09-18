@@ -27,7 +27,7 @@ available through the typed adapter and integration tests.
 `--jev-model jev-1.13.0` is pinned. Moving aliases are rejected. Both documented
 limits are enforced with conservative byte-count estimates plus envelope reserve:
 `--jev-request-limit 64000` and `--jev-state-limit 32000`. These are **estimates**,
-not an official tokenizer. Large focused states can still be rejected by Nerve.
+not an official tokenizer. Large focused states can still be rejected by S1Code.
 
 The adapter allows at most three attempts. It honors Retry-After, uses bounded
 backoff/jitter for 429/529 and appropriate server/transport failures, and does not
@@ -50,7 +50,7 @@ Dependent decisions are evaluated after observing new state.
 ### Jev through OpenRouter
 
 Use `OPENROUTER_API_KEY` with `--decision jev --jev-provider openrouter`.
-OpenRouter keys cannot authenticate the direct TypeSafe endpoint. Nerve uses the
+OpenRouter keys cannot authenticate the direct TypeSafe endpoint. S1Code uses the
 official alpha Decisions endpoint, `https://openrouter.ai/api/alpha/decisions`,
 with `model`, `state`, and `questions`, not the chat-completions endpoint.
 Requests restrict routing to TypeSafe and disable provider fallback. No automatic
@@ -62,7 +62,7 @@ on 2026-09-19. `--jev-resolved-model` changes the expected dated serving build
 explicitly. A different returned build is rejected. The gateway's 32,000-token
 context limit caps both conservative request budgets. Score legends may be omitted
 by the gateway; their meaning is retained in the original question rubric, not
-invented as returned model data. Distribution/confidence fields needed by Nerve's
+invented as returned model data. Distribution/confidence fields needed by S1Code's
 policy must be present or the response is rejected. Reported gateway costs remain
 attached to the response and are not treated as total task cost.
 
@@ -72,7 +72,7 @@ In zsh, enter the key without putting its value in shell history:
 read -s 'OPENROUTER_API_KEY?OpenRouter API key: '
 echo
 export OPENROUTER_API_KEY
-nerve run "fix the parser and run tests" --mode native \
+s1code run "fix the parser and run tests" --mode native \
   --decision jev --jev-provider openrouter --max-provider-requests 8
 ```
 
@@ -83,7 +83,7 @@ selection flags are rejected there instead of being silently ignored.
 An explicit billed gateway contract check is available:
 
 ```sh
-NERVE_LIVE_BUDGET_REQUESTS=1 cargo test --test live openrouter_live_contract -- --ignored
+S1CODE_LIVE_BUDGET_REQUESTS=1 cargo test --test live openrouter_live_contract -- --ignored
 ```
 
 This check was not run during implementation. Local HTTP fixtures verify the wire
@@ -93,7 +93,7 @@ is not a claim of successful live inference.
 The [TypeSafe MCA](https://typesafe.ai/legal/mca) remains separate from Apache-2.0.
 Keep service measurements private until documented clearance. Do not use service
 outputs for imitation, distillation or competing model development. Renaming results
-is not an exception. Nerve's export command refuses Jev traces.
+is not an exception. S1Code's export command refuses Jev traces.
 
 ## Official Codex bridge
 
@@ -101,17 +101,17 @@ Install the official CLI yourself. This build targets **codex-cli 0.153.3** and
 fails closed on other versions until protocol schemas are checked.
 
 ```sh
-nerve login codex
-nerve account codex
-nerve run "fix the parser" --mode codex
-nerve resume <session-id>
-nerve logout codex
+s1code login codex
+s1code account codex
+s1code run "fix the parser" --mode codex
+s1code resume <session-id>
+s1code logout codex
 ```
 
 Login invokes official `account/login/start` with `type: chatgpt`, displays the
 managed authorization URL and waits for `account/login/completed`. Account status
 omits email/plan identifiers. Logout invokes `account/logout` only when requested.
-Nerve does not scrape tokens, implement OAuth, impersonate official clients or call
+S1Code does not scrape tokens, implement OAuth, impersonate official clients or call
 private subscription endpoints. Jev access is separate and is not included in this
 login. No unlimited/free inference claim is made.
 
@@ -120,12 +120,12 @@ thread/resume, turn/start, streaming notifications and turn/interrupt. Permissio
 settings start read-only with network disabled and all granular approval gates on.
 The bridge checks the returned sandbox, working directory, approval policy and user
 approval reviewer. The installed CLI requires `experimentalApi` capability for its
-granular approval policy; Nerve opts in for that documented contract.
+granular approval policy; S1Code opts in for that documented contract.
 Native exclusions cannot be enforced upstream, so `--exclude` is rejected in bridge
 mode. Approving an upstream command can allow execution beyond read-only sandbox;
 the exact upstream request is shown. Persistent grants are unsupported.
 
-Nerve never executes upstream tools itself. Duplicate approval request IDs reuse
+S1Code never executes upstream tools itself. Duplicate approval request IDs reuse
 only an identical reply; changed arguments are rejected. Unknown client requests
 are rejected and permission-extension requests receive no grants. Headless bridge
 approvals are denied; use the terminal for interactive approval. Saved turns are

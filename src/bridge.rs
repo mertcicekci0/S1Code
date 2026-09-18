@@ -139,7 +139,7 @@ impl Rpc {
             let chunk = tokio::select! {biased;_=cancel.cancelled()=>bail!("bridge cancelled"),v=self.stdout.fill_buf()=>v?};
             ensure!(
                 !chunk.is_empty(),
-                "App Server closed the transport; run nerve doctor and inspect official CLI configuration"
+                "App Server closed the transport; run s1code doctor and inspect official CLI configuration"
             );
             let n = chunk.len();
             self.partial.extend_from_slice(chunk);
@@ -322,7 +322,7 @@ impl Bridge {
             self.event("error", json!({"message":e.to_string()}))?;
         }
         self.session.metrics.elapsed_ms += start.elapsed().as_millis() as u64;
-        self.event("summary",json!({"mode":"codex_delegated","status":self.session.status,"metrics":self.session.metrics,"internal_generative_calls":null,"internal_token_usage":null,"verification":self.session.verified,"note":"Upstream execution and verification belong to Codex; Nerve does not control hidden turns or context."}))?;
+        self.event("summary",json!({"mode":"codex_delegated","status":self.session.status,"metrics":self.session.metrics,"internal_generative_calls":null,"internal_token_usage":null,"verification":self.session.verified,"note":"Upstream execution and verification belong to Codex; S1Code does not control hidden turns or context."}))?;
         Ok(self.session)
     }
     async fn drive(&mut self) -> Result<()> {
@@ -350,7 +350,7 @@ impl Bridge {
             .await?;
         ensure!(
             account["account"]["type"] == "chatgpt",
-            "Codex bridge requires managed ChatGPT login; run nerve login codex"
+            "Codex bridge requires managed ChatGPT login; run s1code login codex"
         );
         let mut params = json!({"cwd":self.session.workspace,"sandbox":"read-only","approvalPolicy":approval_policy(),"config":{"analytics.enabled":false,"mcp_servers":{},"apps._default.enabled":false}});
         if self.session.config.generation_model != "codex-default" {
@@ -469,7 +469,7 @@ impl Bridge {
                         .unwrap_or(Value::Null);
                     let token = hash(&serde_json::to_vec(&(&thread, &turn, id, p, &item))?);
                     self.session.status = RunStatus::AwaitingApproval;
-                    self.event("approval_required",json!({"candidate":{"id":token,"action":p},"diff":item,"mode":"codex_delegated","kind":kind,"scope":"Upstream exact request. An approval may permit execution beyond read-only sandbox. Nerve cannot enforce native file/command restrictions inside Codex."}))?;
+                    self.event("approval_required",json!({"candidate":{"id":token,"action":p},"diff":item,"mode":"codex_delegated","kind":kind,"scope":"Upstream exact request. An approval may permit execution beyond read-only sandbox. S1Code cannot enforce native file/command restrictions inside Codex."}))?;
                     let mut accept = false;
                     if self.interactive {
                         loop {

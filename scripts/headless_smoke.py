@@ -5,8 +5,8 @@ import pathlib
 import subprocess
 import tempfile
 
-binary = pathlib.Path("target/debug/nerve").resolve()
-with tempfile.TemporaryDirectory(prefix="nerve-headless-") as directory:
+binary = pathlib.Path("target/debug/s1code").resolve()
+with tempfile.TemporaryDirectory(prefix="s1code-headless-") as directory:
     base = pathlib.Path(directory)
     home, workspace = base / "data", base / "repo"
 

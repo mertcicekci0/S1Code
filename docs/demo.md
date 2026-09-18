@@ -4,8 +4,8 @@
 
 ```sh
 cargo build --locked
-./target/debug/nerve --home /tmp/nerve-demo-store demo --offline \
-  --workspace /tmp/nerve-parser-demo
+./target/debug/s1code --home /tmp/s1code-demo-store demo --offline \
+  --workspace /tmp/s1code-parser-demo
 ```
 
 Use new empty directories. The screen says OFFLINE SIMULATION throughout. Approve:
@@ -16,7 +16,7 @@ Use new empty directories. The screen says OFFLINE SIMULATION throughout. Approv
 The activity/decision/context/diff views show recorded actions and artifacts. This
 is a reproducible harness demonstration, not live Jev or live generation. Generated
 fixture edits are not automatically committed. Press Esc during a process to exercise
-cancellation, then inspect the session with `nerve sessions` and resume it.
+cancellation, then inspect the session with `s1code sessions` and resume it.
 
 ## Live native path
 
@@ -24,7 +24,7 @@ Copy `fixtures/demo/parser.py` and `test_parser.py` into an empty repository, se
 `OPENAI_API_KEY`, and run:
 
 ```sh
-nerve run "Fix parse_count for whole signed integers, blanks and invalid text; run tests" \
+s1code run "Fix parse_count for whole signed integers, blanks and invalid text; run tests" \
   --workspace /path/to/fixture --max-generations 8 --max-provider-requests 12
 ```
 
@@ -40,15 +40,15 @@ With the supported official Codex CLI installed, use your managed ChatGPT login.
 From this source checkout:
 
 ```sh
-./target/release/nerve account codex
+./target/release/s1code account codex
 # If an account is not connected:
-./target/release/nerve login codex
-nerve_trial=$(mktemp -d /tmp/nerve-codex-demo.XXXXXX)
-cp fixtures/demo/*.py "$nerve_trial/"
-git -C "$nerve_trial" init -q
-./target/release/nerve run \
+./target/release/s1code login codex
+s1code_trial=$(mktemp -d /tmp/s1code-codex-demo.XXXXXX)
+cp fixtures/demo/*.py "$s1code_trial/"
+git -C "$s1code_trial" init -q
+./target/release/s1code run \
   "Fix parse_count for whole signed integers, blanks and invalid text; run tests" \
-  --mode codex --workspace "$nerve_trial"
+  --mode codex --workspace "$s1code_trial"
 ```
 
 This is live delegated execution and uses your account's applicable limits. It is
@@ -59,7 +59,7 @@ turn has not been verified. See providers.md for ownership and permission limits
 ## Real context pressure
 
 ```sh
-nerve context-demo --workspace /tmp/nerve-context-demo
+s1code context-demo --workspace /tmp/s1code-context-demo
 ```
 
 This creates harmless diagnostic files, captures five real read results, pins the
@@ -70,10 +70,10 @@ does not rerun a tool. This demonstrates recoverability, not lossless understand
 ## Headless approval, export and replay
 
 ```sh
-nerve demo --offline --headless --workspace /tmp/nerve-headless-demo
-nerve resume SESSION --headless --approve EXACT_CANDIDATE_ID
-nerve export SESSION /tmp/nerve-demo.jsonl
-nerve replay /tmp/nerve-demo.jsonl
+s1code demo --offline --headless --workspace /tmp/s1code-headless-demo
+s1code resume SESSION --headless --approve EXACT_CANDIDATE_ID
+s1code export SESSION /tmp/s1code-demo.jsonl
+s1code replay /tmp/s1code-demo.jsonl
 ```
 
 Repeat resume with the next displayed approval ID. Exported events strip known keys

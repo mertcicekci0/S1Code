@@ -283,7 +283,9 @@ impl Workspace {
             // Recheck immediately before each file replacement. This is not multi-file atomicity.
             let current = fs::read(path).ok();
             if current != *old {
-                bail!("concurrent edit during patch; recovery journal retained; run nerve recover");
+                bail!(
+                    "concurrent edit during patch; recovery journal retained; run s1code recover"
+                );
             }
             let permissions = fs::metadata(path).ok().map(|m| m.permissions());
             if let Err(e) = atomic_write(path, edit.content.as_bytes()) {

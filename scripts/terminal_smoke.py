@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Exercise the actual TUI in a disposable PTY, including narrow resize and approvals."""
 import fcntl,json,os,pathlib,pty,select,signal,struct,subprocess,tempfile,termios,time
-binary=pathlib.Path('target/debug/nerve').resolve()
-base=pathlib.Path(tempfile.mkdtemp(prefix='nerve-terminal-'));home=base/'data';root=base/'repo'
+binary=pathlib.Path('target/debug/s1code').resolve()
+base=pathlib.Path(tempfile.mkdtemp(prefix='s1code-terminal-'));home=base/'data';root=base/'repo'
 master,slave=pty.openpty()
 fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,50,0,0))
 env=dict(os.environ);env['TERM']='xterm-256color'

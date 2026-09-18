@@ -13,7 +13,7 @@ while pending:
 allowed={'Apache-2.0','MIT','BSD-2-Clause','BSD-3-Clause','ISC','Zlib','Unicode-3.0','Unicode-DFS-2016','Unlicense','BSL-1.0','CC0-1.0','OpenSSL','MPL-2.0','CDLA-Permissive-2.0'}
 problems=[]; packages=[]; notices=[]
 for package in sorted(metadata['packages'],key=lambda p:(p['name'],p['version'])):
-    if package['id'] not in reachable or (package['name']=='nerve' and package['source'] is None): continue
+    if package['id'] not in reachable or (package['name']=='s1code' and package['source'] is None): continue
     expression=package.get('license') or ''
     alternatives=expression.split(' OR ')
     accepted=[part for part in alternatives if set(re.findall(r'[A-Za-z0-9.+-]+',part))-{'AND'} <= allowed]
@@ -33,7 +33,7 @@ for package in sorted(metadata['packages'],key=lambda p:(p['name'],p['version'])
     notices.append(f"\n{'='*70}\n{package['name']} {package['version']}\nSPDX: {expression}\n"+'\n'.join(contents))
 out=pathlib.Path('target/notices');out.mkdir(parents=True,exist_ok=True)
 (out/'inventory.json').write_text(json.dumps(packages,indent=2)+'\n')
-(out/'THIRD_PARTY_LICENSES.txt').write_text('Nerve dependency notices, generated from Cargo.lock registry archives.\n'+'\n'.join(notices))
+(out/'THIRD_PARTY_LICENSES.txt').write_text('S1Code dependency notices, generated from Cargo.lock registry archives.\n'+'\n'.join(notices))
 (out/'findings.txt').write_text('\n'.join(problems)+'\n')
 print(f'Inventoried {len(packages)} dependencies for {host}. Notices: target/notices/THIRD_PARTY_LICENSES.txt')
 for problem in problems: print(problem,file=sys.stderr)

@@ -17,13 +17,13 @@ and Python unittest. Broader ecosystems are not supported in v0.
 
 Native paths reject traversal, absolute paths, symlinks, dotfiles, ignored paths,
 common credential names and explicit exclusions. Root `AGENTS.md` can guide coding
-but cannot grant permissions. These guards govern Nerve file tools; approved
+but cannot grant permissions. These guards govern S1Code file tools; approved
 repository code can access files outside them. The implementation assumes no hostile
 concurrent filesystem actor replacing parent directories during syscalls. Ordinary
 concurrent edits are checked before selection, after approval and before writes;
-Nerve is not a defense against malicious same-user filesystem races.
+S1Code is not a defense against malicious same-user filesystem races.
 
-A workspace advisory lock serializes Nerve writers across storage homes. Other
+A workspace advisory lock serializes S1Code writers across storage homes. Other
 editors do not participate. All patch files are validated before mutation. Writes
 are individually replaced and a durable journal retains original artifact bytes.
 This is not multi-file atomicity. Recovery checks every current hash before restoring

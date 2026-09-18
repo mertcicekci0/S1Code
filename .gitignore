@@ -1,4 +1,5 @@
 /target/
+/.s1code/
 /.nerve/
 /eval-results/
 /private/
@@ -8,4 +9,3 @@
 *.log
 __pycache__/
 *.pyc
-

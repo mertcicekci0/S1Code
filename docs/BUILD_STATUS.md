@@ -122,6 +122,14 @@ cargo run --locked -- eval --suite fixtures/heldout --output eval-results/heldou
 ```
 
 Explicit billed Jev contract check (not run here): configure TYPESAFE_API_KEY and
-NERVE_LIVE_BUDGET_REQUESTS, then `cargo test --test live jev_live_contract -- --ignored`.
-Use the documented `nerve eval --live` command for actual coding trials with both
+S1CODE_LIVE_BUDGET_REQUESTS, then `cargo test --test live jev_live_contract -- --ignored`.
+Use the documented `s1code eval --live` command for actual coding trials with both
 credentials and execution/request-budget consent. Keep results private.
+
+## 0.2.0 work in progress
+
+- Product/package/executable renamed to S1Code / `s1code`; legacy v1 sessions
+  are reused without destructive migration. The workspace lock namespace remains
+  shared with old executables. All 31 offline tests passed after the rename.
+- Next: task-entry home screen, native Claude streaming adapter, provider selection,
+  corresponding protocol/UI tests and final release build. No new live inference.

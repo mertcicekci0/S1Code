@@ -18,7 +18,7 @@ API field names implement public wire contracts. Newly authored code is Apache-2
   `demo/JevDemo/main.swift`, README and LICENSE. The library groups call/results,
   batches independent questions, estimates tokens and throws failures to callers.
   Its fitted state often omits actual output content. The hook can fall back to a
-  built-in summary. The Swift presentation is explicitly scripted. Nerve instead
+  built-in summary. The Swift presentation is explicitly scripted. S1Code instead
   retains canonical bytes and presents actual excerpts to eviction decisions.
   No code reuse or modifications of that project.
 - [Harness article](https://www.langchain.com/blog/building-a-harness-with-jev):

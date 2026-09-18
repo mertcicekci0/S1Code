@@ -1,6 +1,6 @@
 use anyhow::{Result, ensure};
 use clap::{Args, Parser, Subcommand};
-use nerve::{
+use s1code::{
     brand, demo,
     domain::*,
     engine::{Engine, workspace_for},
@@ -16,7 +16,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Parser)]
-#[command(name=brand::BIN,version,about="Nerve — bounded coding actions and recoverable context")]
+#[command(name=brand::BIN,version,about="S1Code — bounded coding actions and recoverable context")]
 struct Cli {
     #[arg(long, global = true)]
     home: Option<PathBuf>,
@@ -151,7 +151,7 @@ enum Commands {
 #[tokio::main]
 async fn main() {
     if let Err(e) = entry().await {
-        eprintln!("nerve: {e:#}");
+        eprintln!("s1code: {e:#}");
         std::process::exit(1)
     }
 }
@@ -163,9 +163,9 @@ async fn entry() -> Result<()> {
     } else {
         ensure!(
             io::stdin().is_terminal(),
-            "provide a task: nerve run \"fix a bug\" --headless"
+            "provide a task: s1code run \"fix a bug\" --headless"
         );
-        eprint!("Nerve · native / OpenAI Responses · task: ");
+        eprint!("S1Code · native / OpenAI Responses · task: ");
         io::stderr().flush()?;
         let mut task = String::new();
         io::stdin().read_line(&mut task)?;
@@ -224,7 +224,7 @@ async fn entry() -> Result<()> {
                 }),
                 jev_model: a.jev_model.unwrap_or_else(|| {
                     if a.jev_provider == "openrouter" {
-                        nerve::decisions::OPENROUTER_MODEL.into()
+                        s1code::decisions::OPENROUTER_MODEL.into()
                     } else {
                         "jev-1.13.0".into()
                     }
@@ -287,7 +287,7 @@ async fn entry() -> Result<()> {
             if acknowledge_interruption {
                 ensure!(
                     !store.dir.join("patch-recovery.json").exists(),
-                    "run nerve recover first"
+                    "run s1code recover first"
                 );
                 s.inflight = None;
                 s.recovery_needed = false;
@@ -335,10 +335,10 @@ async fn entry() -> Result<()> {
                 let _ = tokio::signal::ctrl_c().await;
                 c.cancel();
             });
-            let report = nerve::evaluation::evaluate(
+            let report = s1code::evaluation::evaluate(
                 &suite,
                 &output,
-                nerve::evaluation::EvalOptions {
+                s1code::evaluation::EvalOptions {
                     live,
                     approve_execution: approve_fixture_execution,
                     request_budget: live_budget_requests,
@@ -387,16 +387,16 @@ async fn entry() -> Result<()> {
             account_command("status").await?;
         }
         Commands::Doctor => {
-            nerve::session::private_dir(&home)?;
+            s1code::session::private_dir(&home)?;
             let probe = home.join(format!(".probe-{}", uuid::Uuid::new_v4()));
             std::fs::write(&probe, b"ok")?;
             std::fs::remove_file(probe)?;
-            let compatibility = nerve::bridge::compatibility().await;
+            let compatibility = s1code::bridge::compatibility().await;
             let codex = compatibility.as_ref().ok().cloned();
             let diagnostic = compatibility.err().map(|e| e.to_string());
             println!(
                 "{}",
-                serde_json::json!({"name":brand::NAME,"version":env!("CARGO_PKG_VERSION"),"storage_version":brand::STORAGE_VERSION,"storage_writable":true,"openai_key_present":std::env::var_os("OPENAI_API_KEY").is_some(),"typesafe_key_present":std::env::var_os("TYPESAFE_API_KEY").is_some(),"openrouter_key_present":std::env::var_os("OPENROUTER_API_KEY").is_some(),"codex_cli":codex,"codex_diagnostic":diagnostic,"codex_cli_compatible":codex.as_deref()==Some(nerve::bridge::TESTED_CLI),"codex_cli_expected":nerve::bridge::TESTED_CLI,"native_security":{"os_sandbox":false,"network_isolation":false,"process_groups":cfg!(unix),"exact_approval":true},"supported_platforms":["macOS","Linux"],"telemetry":false})
+                serde_json::json!({"name":brand::NAME,"version":env!("CARGO_PKG_VERSION"),"storage_version":brand::STORAGE_VERSION,"storage_writable":true,"openai_key_present":std::env::var_os("OPENAI_API_KEY").is_some(),"typesafe_key_present":std::env::var_os("TYPESAFE_API_KEY").is_some(),"openrouter_key_present":std::env::var_os("OPENROUTER_API_KEY").is_some(),"codex_cli":codex,"codex_diagnostic":diagnostic,"codex_cli_compatible":codex.as_deref()==Some(s1code::bridge::TESTED_CLI),"codex_cli_expected":s1code::bridge::TESTED_CLI,"native_security":{"os_sandbox":false,"network_isolation":false,"process_groups":cfg!(unix),"exact_approval":true},"supported_platforms":["macOS","Linux"],"telemetry":false})
             );
         }
         Commands::ContextDemo { workspace } => {
@@ -427,7 +427,7 @@ async fn entry() -> Result<()> {
                 let event: serde_json::Value = serde_json::from_str(line)?;
                 println!(
                     "{}",
-                    serde_json::json!({"playback":"REPLAY — not live execution","record":nerve::privacy::Redactor::environment("").value(&event)})
+                    serde_json::json!({"playback":"REPLAY — not live execution","record":s1code::privacy::Redactor::environment("").value(&event)})
                 );
             }
         }
@@ -501,7 +501,7 @@ async fn present(
     label: String,
 ) -> Result<()> {
     if interactive {
-        let result = nerve::ui::terminal(rx, input, cancel.clone(), label).await;
+        let result = s1code::ui::terminal(rx, input, cancel.clone(), label).await;
         if result.is_err() {
             cancel.cancel();
         }
@@ -509,7 +509,7 @@ async fn present(
             println!(
                 "Session {}\n{}",
                 summary.session,
-                nerve::ui::summary_text(&summary.data)
+                s1code::ui::summary_text(&summary.data)
             );
         }
     } else {
@@ -527,7 +527,7 @@ async fn account_command(operation: &str) -> Result<()> {
         let _ = tokio::signal::ctrl_c().await;
         c.cancel();
     });
-    let result = nerve::bridge::account(operation, &cancel).await;
+    let result = s1code::bridge::account(operation, &cancel).await;
     signal.abort();
     println!("{}", result?);
     Ok(())
@@ -542,7 +542,7 @@ async fn drive_bridge(store: Store, s: Session, headless: bool, continue_task: b
         c.cancel();
     });
     let interactive = !headless && io::stdin().is_terminal() && io::stdout().is_terminal();
-    let bridge = nerve::bridge::Bridge {
+    let bridge = s1code::bridge::Bridge {
         store,
         session: s,
         events,

@@ -1,6 +1,6 @@
 # Architecture
 
-Nerve's native engine owns observation, candidate construction, deterministic
+S1Code's native engine owns observation, candidate construction, deterministic
 filtering, optional bounded selection, revalidation, execution, durable evidence,
 and verification. A provider returns proposals or typed decisions; it never owns
 local execution. Exact facts such as hashes, exit codes and permissions stay in code.
@@ -91,7 +91,7 @@ budgets are separate. If protected evidence cannot fit, the run stops explicitly
 
 Codex mode requests the official runtime's managed ChatGPT authentication, threads,
 turns and approvals. The CLI version/schema boundary is explicit. Read-only sandbox
-and granular approval gates are verified before any turn. Nerve forwards requests to
+and granular approval gates are verified before any turn. S1Code forwards requests to
 the user, handles unknown requests conservatively, and never executes them twice.
 
 A saved active turn is reattached; stopped turns are observed without replay. An
@@ -100,3 +100,14 @@ turn completion is not silently retried. Delegations, upstream verification and
 unknown internal usage are reported separately from native tool/model metrics.
 No hidden reasoning, upstream context ownership or per-model-call accounting is
 claimed for this mode.
+
+## Rename and storage compatibility
+
+The executable/package is now `s1code`, displayed as S1Code. Storage remains
+version 1. `--home` takes precedence, then `S1CODE_HOME`, then the legacy
+`NERVE_HOME`. Without an override, an existing legacy `nerve` data directory with
+sessions is reused in place when the new directory does not exist. No records are
+moved, merged, or deleted automatically. If both stores exist, use `--home` to
+select the older one. Old binaries are not removed by building the new executable.
+The v1 workspace-lock namespace also stays unchanged so running an old executable
+alongside S1Code cannot introduce a second writer to the same workspace.
