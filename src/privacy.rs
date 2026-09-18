@@ -5,6 +5,15 @@ pub struct Redactor {
     paths: Vec<String>,
 }
 impl Redactor {
+    pub fn with_secrets(secrets: Vec<String>) -> Self {
+        Self {
+            secrets: secrets.into_iter().filter(|s| !s.is_empty()).collect(),
+            paths: vec![],
+        }
+    }
+    pub fn contains_secret(&self, text: &str) -> bool {
+        self.secrets.iter().any(|s| text.contains(s))
+    }
     pub fn environment(workspace: &str) -> Self {
         let secrets = std::env::vars()
             .filter(|(k, v)| {
@@ -65,5 +74,47 @@ impl Redactor {
                 .collect(),
             _ => value.clone(),
         }
+    }
+}
+
+/// Retains enough unrendered text to redact a known value spanning stream chunks.
+pub struct StreamRedactor {
+    buffer: String,
+    redactor: Redactor,
+}
+impl StreamRedactor {
+    pub fn new(redactor: Redactor) -> Self {
+        Self {
+            buffer: String::new(),
+            redactor,
+        }
+    }
+    pub fn push(&mut self, text: &str) -> String {
+        self.buffer.push_str(text);
+        let values = self
+            .redactor
+            .secrets
+            .iter()
+            .chain(self.redactor.paths.iter());
+        let window = values.clone().map(String::len).max().unwrap_or(1);
+        let mut end = self.buffer.len().saturating_sub(window);
+        while !self.buffer.is_char_boundary(end) {
+            end -= 1;
+        }
+        for value in values {
+            for (start, _) in self.buffer.match_indices(value) {
+                if start < end && start + value.len() > end {
+                    end = start;
+                }
+            }
+        }
+        let ready = self.buffer[..end].to_owned();
+        self.buffer.drain(..end);
+        self.redactor.text(&ready)
+    }
+    pub fn finish(&mut self) -> String {
+        let text = self.redactor.text(&self.buffer);
+        self.buffer.clear();
+        text
     }
 }

@@ -43,13 +43,29 @@ impl Engine {
             self.session.config.mode == Mode::Native,
             "native engine cannot own delegated mode"
         );
-        if self.session.inflight.is_some() || self.store.dir.join("patch-recovery.json").exists() {
+        if self.session.recovery_needed
+            || self.session.inflight.is_some()
+            || self.store.dir.join("patch-recovery.json").exists()
+        {
             self.session.status = RunStatus::Blocked;
             self.event("recovery_required",json!({"message":"An interrupted action may have completed. Inspect workspace and trace, recover any patch journal, then resume with --acknowledge-interruption. No automatic replay."}))?;
             return Ok(());
         }
         if self.session.status == RunStatus::Completed {
             return Ok(());
+        }
+        let mut jev =
+            if self.session.config.decision == "jev" || self.session.config.eviction == "jev" {
+                Some(crate::decisions::Jev::from_env(
+                    &self.session.config.jev_model,
+                    self.session.config.jev_request_limit,
+                    self.session.config.jev_state_limit,
+                )?)
+            } else {
+                None
+            };
+        if let Some(j) = &mut jev {
+            j.max_requests = self.session.config.max_provider_requests;
         }
         self.session.status = RunStatus::Running;
         self.event("started",json!({"mode":"native","decision":self.session.config.decision,"model":self.session.config.generation_model,"simulation":self.session.config.offline_demo,"session":self.session.id}))?;
@@ -58,24 +74,20 @@ impl Engine {
                 self.session.status = RunStatus::Cancelled;
                 break;
             }
+            if self.session.metrics.generative_calls + self.session.metrics.decision_requests
+                >= self.session.config.max_provider_requests
+            {
+                self.session.status = RunStatus::BudgetExhausted;
+                break;
+            }
             let revision = self.workspace.revision()?;
             let chosen = if let Some(pending) = self.session.pending.clone() {
                 pending
             } else {
-                let dropped = context::compact(&mut self.session, &self.store, None)?;
-                if !dropped.is_empty() {
-                    self.session.metrics.context_invalidations += 1;
-                    self.event("context_evicted",json!({"policy":"conservative","artifacts":dropped,"cache_prefix_changed":true}))?;
-                }
+                self.compact_context(&mut jev).await?;
                 let candidates = self.construct(&revision)?;
                 self.event("candidates", json!({"candidates":candidates}))?;
-                let chosen = candidates
-                    .iter()
-                    .find(|c| c.class != PolicyClass::Deny)
-                    .cloned()
-                    .ok_or_else(|| anyhow::anyhow!("no admissible action"))?;
-                self.event("selection",json!({"candidate":chosen.id,"source":"deterministic_rules","explanation":"First admissible evidence or proposed action; model confidence does not grant permission."}))?;
-                chosen
+                self.select(candidates, &mut jev).await?
             };
             if let Err(e) = policy::revalidate(&chosen, &revision) {
                 self.session.pending = None;
@@ -122,13 +134,36 @@ impl Engine {
                     self.event("generation_requested",json!({"purpose":"plan_or_propose_next_action","simulated":self.generator.simulated()}))?;
                     let input = context::render(&self.session, &self.store)?;
                     let (tx, mut rx) = mpsc::unbounded_channel();
+                    let mut display =
+                        crate::privacy::StreamRedactor::new(self.store.redactor.clone());
                     let generator = Arc::clone(&self.generator);
                     let cancel = self.cancel.clone();
                     let future = generator.generate(input, &cancel, tx);
                     tokio::pin!(future);
                     let response = loop {
-                        tokio::select! {result=&mut future=>break result?,Some(delta)=rx.recv()=>{let _=self.events.send(RunEvent{seq:0,session:self.session.id.clone(),kind:"stream".into(),data:json!({"delta":self.store.redactor.text(&delta)})});}}
+                        tokio::select! {result=&mut future=>break result?,Some(delta)=rx.recv()=>{let _=self.events.send(RunEvent{seq:0,session:self.session.id.clone(),kind:"stream".into(),data:json!({"delta":display.push(&delta)})});}}
                     };
+                    while let Ok(delta) = rx.try_recv() {
+                        let _ = self.events.send(RunEvent {
+                            seq: 0,
+                            session: self.session.id.clone(),
+                            kind: "stream".into(),
+                            data: json!({"delta":display.push(&delta)}),
+                        });
+                    }
+                    let _ = self.events.send(RunEvent {
+                        seq: 0,
+                        session: self.session.id.clone(),
+                        kind: "stream".into(),
+                        data: json!({"delta":display.finish()}),
+                    });
+                    ensure!(
+                        !self
+                            .store
+                            .redactor
+                            .contains_secret(&serde_json::to_string(&response.proposal)?),
+                        "provider proposal contained a known secret; refusing persistence/execution"
+                    );
                     self.session.metrics.usage.push(response.usage.clone());
                     self.session.proposals = response.proposal.actions.clone();
                     self.event("proposal",json!({"message":response.proposal.message,"actions":response.proposal.actions,"model":response.model,"usage":response.usage}))?;
@@ -279,6 +314,26 @@ impl Engine {
                 provenance = "literal user identifiers and repository instructions";
             }
         }
+        if actions.is_empty()
+            && let Some(last) = self.session.context.last()
+            && matches!(last.action, Action::Search { .. })
+        {
+            let bytes = self.store.get(&last.artifact.hash)?;
+            for line in String::from_utf8_lossy(&bytes).lines().take(4) {
+                let mut fields = line.splitn(3, ':');
+                if let (Some(path), Some(number)) = (fields.next(), fields.next())
+                    && let Ok(n) = number.parse::<usize>()
+                    && self.workspace.path(path, false).is_ok()
+                {
+                    actions.push(Action::Read {
+                        path: path.into(),
+                        start: n.saturating_sub(10).max(1),
+                        lines: 80,
+                    });
+                }
+            }
+            provenance = "literal search results";
+        }
         // Always provide an escape route. A forced initial discovery is deterministic.
         if !matches!(actions.as_slice(), [Action::List]) {
             actions.push(Action::AskGenerator);
@@ -291,6 +346,188 @@ impl Engine {
             .take(8)
             .map(|a| policy::candidate(a, revision, provenance, evidence.clone()))
             .collect())
+    }
+    async fn select(
+        &mut self,
+        candidates: Vec<CandidateAction>,
+        jev: &mut Option<crate::decisions::Jev>,
+    ) -> Result<CandidateAction> {
+        use crate::decisions::{Answer, Question};
+        let admissible: Vec<_> = candidates
+            .into_iter()
+            .filter(|c| c.class != PolicyClass::Deny)
+            .collect();
+        let first = admissible
+            .first()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("no admissible candidate"))?;
+        let ambiguous = admissible
+            .iter()
+            .filter(|c| !matches!(c.action, Action::AskGenerator))
+            .count()
+            > 1;
+        if !ambiguous || self.session.config.decision == "rules" {
+            self.event(
+                "selection",
+                json!({"candidate":first.id,"source":"deterministic_rules","forced":!ambiguous}),
+            )?;
+            return Ok(first);
+        }
+        let mut state = context::render(&self.session, &self.store)?;
+        state["candidates"] = serde_json::to_value(&admissible)?;
+        state["policy_version"] = crate::brand::POLICY_VERSION.into();
+        if self.session.config.decision == "generative" {
+            ensure!(
+                self.session.metrics.generative_calls < self.session.config.max_generations,
+                "generative decision budget exhausted"
+            );
+            self.session.metrics.generative_calls += 1;
+            state["selection_contract"] = "Return exactly ONE of the supplied candidate actions, byte-equivalent in arguments. Select the most relevant next action; ask_generator is the escape route. Do not invent an action or execute tools.".into();
+            self.event(
+                "generation_requested",
+                json!({"purpose":"constrained_decision_baseline"}),
+            )?;
+            let (tx, _rx) = mpsc::unbounded_channel();
+            let result = self.generator.generate(state, &self.cancel, tx).await?;
+            self.session.metrics.usage.push(result.usage);
+            ensure!(
+                result.proposal.actions.len() == 1,
+                "baseline must select one action"
+            );
+            let selected = admissible
+                .iter()
+                .find(|c| c.action == result.proposal.actions[0])
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("baseline selected outside candidate set"))?;
+            self.event("selection",json!({"source":"constrained_generative","candidate":selected.id,"model":result.model}))?;
+            return Ok(selected);
+        }
+        let criteria = admissible
+            .iter()
+            .map(|c| {
+                (
+                    c.id.clone(),
+                    Some(serde_json::to_string(&c.action).unwrap()),
+                )
+            })
+            .collect();
+        let questions=std::collections::BTreeMap::from([("next_action".into(),Question::Choice{instructions:"Select the most useful concrete next action for the user's task from the candidates and evidence. Prefer additional generation when the candidates lack sufficient evidence or complete arguments. Scores never grant permission.".into(),criteria})]);
+        self.event("decision_requested",json!({"purpose":"action_relevance","questions":1,"model":self.session.config.jev_model}))?;
+        let result = jev
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("Jev is not configured"))?
+            .ask(state, questions, &self.cancel, &mut self.session.metrics)
+            .await;
+        match result {
+            Ok(response) => {
+                let Answer::Choice {
+                    choice,
+                    confidence,
+                    probabilities,
+                } = &response.answers["next_action"]
+                else {
+                    bail!("expected Choice")
+                };
+                let selection = if *confidence < self.session.config.jev_confidence {
+                    admissible
+                        .iter()
+                        .find(|c| matches!(c.action, Action::AskGenerator))
+                } else {
+                    admissible.iter().find(|c| c.id == *choice)
+                }
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("selection unavailable"))?;
+                self.event("selection",json!({"source":"jev","candidate":selection.id,"choice":choice,"selection_probability":probabilities[choice],"distribution_confidence":confidence,"response":response,"threshold_experimental":true}))?;
+                Ok(selection)
+            }
+            Err(e) => {
+                self.event("decision_failed",json!({"error":e.to_string(),"fallback_rules":self.session.config.jev_fallback_rules}))?;
+                if self.cancel.is_cancelled() || !self.session.config.jev_fallback_rules {
+                    return Err(e);
+                }
+                self.event(
+                    "selection",
+                    json!({"source":"explicit_rules_fallback","candidate":first.id}),
+                )?;
+                Ok(first)
+            }
+        }
+    }
+    async fn compact_context(&mut self, jev: &mut Option<crate::decisions::Jev>) -> Result<()> {
+        use crate::decisions::{Answer, Question};
+        let size = context::render(&self.session, &self.store)?
+            .to_string()
+            .len();
+        if self.session.config.eviction == "off" {
+            ensure!(
+                size <= self.session.config.context_bytes,
+                "context budget exhausted; eviction disabled"
+            );
+            return Ok(());
+        }
+        if size <= self.session.config.context_bytes * 85 / 100 {
+            return Ok(());
+        }
+        let mut preferred = None;
+        let mut source = self.session.config.eviction.clone();
+        if source == "jev" {
+            let state = context::excerpts(&self.session, &self.store)?;
+            let mut drop_ids = std::collections::BTreeSet::new();
+            let eligible = context::eligible(&self.session);
+            let mut failed = None;
+            // Independent retention questions share one snapshot; bound each batch.
+            for batch in eligible.chunks(8) {
+                let questions=batch.iter().map(|i|{let id=self.session.context[*i].artifact.hash.clone();(id.clone(),Question::Noul{instructions:format!("Does the full evidence artifact {id}, shown with actual excerpt and diagnostic lines in the state, need to stay active for the current task? Yes means retain. No means it can be evicted and retrieved exactly later.")})}).collect();
+                self.event(
+                    "decision_requested",
+                    json!({"purpose":"context_retention","questions":batch.len()}),
+                )?;
+                match jev
+                    .as_mut()
+                    .ok_or_else(|| anyhow::anyhow!("Jev unavailable"))?
+                    .ask(
+                        state.clone(),
+                        questions,
+                        &self.cancel,
+                        &mut self.session.metrics,
+                    )
+                    .await
+                {
+                    Ok(response) => {
+                        for (id, answer) in &response.answers {
+                            if let Answer::Noul { noul } = answer
+                                && *noul < 0.5
+                            {
+                                drop_ids.insert(id.clone());
+                            }
+                        }
+                        self.event(
+                            "eviction_decision",
+                            json!({"response":response,"noul_is_not_confidence":true}),
+                        )?;
+                    }
+                    Err(e) => {
+                        failed = Some(e);
+                        break;
+                    }
+                }
+            }
+            if let Some(e) = failed {
+                self.event("eviction_failed",json!({"error":e.to_string(),"fallback_rules":self.session.config.jev_fallback_rules}))?;
+                if !self.session.config.jev_fallback_rules || self.cancel.is_cancelled() {
+                    return Err(e);
+                }
+                source = "explicit_conservative_fallback".into();
+            } else {
+                preferred = Some(drop_ids);
+            }
+        }
+        let dropped = context::compact(&mut self.session, &self.store, preferred.as_ref())?;
+        if !dropped.is_empty() {
+            self.session.metrics.context_invalidations += 1;
+            self.event("context_evicted",json!({"policy":source,"artifacts":dropped,"cache_prefix_changed":true,"bytes_before":size,"bytes_after":context::render(&self.session,&self.store)?.to_string().len()}))?;
+        }
+        Ok(())
     }
     async fn approve(&mut self, c: &CandidateAction) -> Result<bool> {
         if c.class == PolicyClass::Deny {

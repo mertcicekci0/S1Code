@@ -148,6 +148,8 @@ pub struct RunConfig {
     pub jev_model: String,
     pub max_steps: usize,
     pub max_generations: u64,
+    #[serde(default = "default_requests")]
+    pub max_provider_requests: u64,
     pub context_bytes: usize,
     pub exclusions: Vec<String>,
     pub jev_fallback_rules: bool,
@@ -167,6 +169,7 @@ impl Default for RunConfig {
             jev_model: "jev-1.13.0".into(),
             max_steps: 40,
             max_generations: 12,
+            max_provider_requests: 24,
             context_bytes: 96_000,
             exclusions: vec![],
             jev_fallback_rules: false,
@@ -177,6 +180,10 @@ impl Default for RunConfig {
             offline_demo: false,
         }
     }
+}
+
+fn default_requests() -> u64 {
+    24
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -198,6 +205,8 @@ pub struct Session {
     pub bridge_thread: Option<String>,
     pub bridge_turn: Option<String>,
     pub event_seq: u64,
+    #[serde(default)]
+    pub recovery_needed: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

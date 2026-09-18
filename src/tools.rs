@@ -119,10 +119,10 @@ impl Workspace {
         for d in parents.into_iter().rev() {
             for name in [".gitignore", ".ignore"] {
                 let f = d.join(name);
-                if f.exists() {
-                    if let Some(e) = builder.add(f) {
-                        return Err(e.into());
-                    }
+                if f.exists()
+                    && let Some(e) = builder.add(f)
+                {
+                    return Err(e.into());
                 }
             }
         }
@@ -188,7 +188,7 @@ impl Workspace {
                 records.push((name.into(), hash(&fs::read(p)?)));
             }
         }
-        Ok(hash(&serde_json::to_vec(&records)?))
+        Ok(hash(&serde_json::to_vec(&(&self.root, records))?))
     }
     pub fn validate_edits(&self, edits: &[Edit]) -> Result<Vec<(PathBuf, Option<Vec<u8>>)>> {
         ensure!(
@@ -382,37 +382,44 @@ impl Workspace {
             }
             Action::Git => {
                 // Builtin git inspections do not run aliases, external diff drivers, pagers, or hooks.
-                let status = process(
-                    &self.root,
-                    &[
-                        "git",
-                        "--no-pager",
-                        "-c",
-                        "core.fsmonitor=false",
-                        "status",
-                        "--short",
-                    ]
-                    .map(String::from),
-                    cancel,
-                    Duration::from_secs(10),
-                )
-                .await?;
-                let diff = process(
-                    &self.root,
-                    &[
-                        "git",
-                        "--no-pager",
-                        "-c",
-                        "core.fsmonitor=false",
-                        "diff",
-                        "--no-ext-diff",
-                        "--no-textconv",
-                    ]
-                    .map(String::from),
-                    cancel,
-                    Duration::from_secs(10),
-                )
-                .await?;
+                let paths = self.files()?;
+                if paths.is_empty() {
+                    return Ok(ToolResult {
+                        text: "No allowed files for git inspection".into(),
+                        exit_code: None,
+                        diagnostic: false,
+                    });
+                }
+                let mut status_args = [
+                    "git",
+                    "--no-pager",
+                    "--literal-pathspecs",
+                    "-c",
+                    "core.fsmonitor=false",
+                    "status",
+                    "--short",
+                    "--",
+                ]
+                .map(String::from)
+                .to_vec();
+                status_args.extend(paths.clone());
+                let mut diff_args = [
+                    "git",
+                    "--no-pager",
+                    "--literal-pathspecs",
+                    "-c",
+                    "core.fsmonitor=false",
+                    "diff",
+                    "--no-ext-diff",
+                    "--no-textconv",
+                    "--",
+                ]
+                .map(String::from)
+                .to_vec();
+                diff_args.extend(paths);
+                let status =
+                    process(&self.root, &status_args, cancel, Duration::from_secs(10)).await?;
+                let diff = process(&self.root, &diff_args, cancel, Duration::from_secs(10)).await?;
                 format!("{}\n{}", status.text, diff.text)
             }
             Action::Rehydrate { artifact } => {

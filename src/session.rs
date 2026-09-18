@@ -74,7 +74,7 @@ impl Store {
             version: brand::STORAGE_VERSION,
             id,
             workspace: workspace.to_string_lossy().into(),
-            task,
+            task: store.redactor.text(&task),
             config,
             status: RunStatus::Running,
             context: vec![],
@@ -88,6 +88,7 @@ impl Store {
             bridge_thread: None,
             bridge_turn: None,
             event_seq: 0,
+            recovery_needed: false,
         };
         store.save(&s)?;
         Ok((store, s))
@@ -95,16 +96,19 @@ impl Store {
     fn open(home: &Path, id: &str, workspace: &Path) -> Result<Self> {
         uuid::Uuid::parse_str(id).context("invalid session id")?;
         private_dir(home)?;
-        private_dir(&home.join("locks"))?;
+        #[cfg(unix)]
+        let locks = PathBuf::from(format!("/tmp/{}-workspace-locks-{}", brand::BIN, unsafe {
+            libc::geteuid()
+        }));
+        #[cfg(not(unix))]
+        let locks = home.join("locks");
+        private_dir(&locks)?;
         let lock = OpenOptions::new()
             .create(true)
             .truncate(false)
             .read(true)
             .write(true)
-            .open(
-                home.join("locks")
-                    .join(hash(workspace.as_os_str().as_encoded_bytes())),
-            )?;
+            .open(locks.join(hash(workspace.as_os_str().as_encoded_bytes())))?;
         lock.try_lock_exclusive()
             .context("Workspace is already owned by another Nerve process")?;
         let dir = home.join("sessions").join(id);
@@ -127,10 +131,12 @@ impl Store {
             s.version
         );
         let store = Self::open(home, id, Path::new(&s.workspace))?;
+        s = serde_json::from_slice(&fs::read(&path)?)?;
         // The journal may be ahead of the checkpoint. Do not replay unknown effects.
         let events = store.events()?;
         if events.last().is_some_and(|e| e.seq > s.event_seq) || s.inflight.is_some() {
             s.status = RunStatus::Blocked;
+            s.recovery_needed = true;
         }
         s.event_seq = events
             .last()

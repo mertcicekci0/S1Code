@@ -65,6 +65,7 @@ pub fn proposal_schema() -> Value {
     let uint = json!({"type":"integer","minimum":1});
     let edit = object(json!({"path":str_,"before_hash":{"type":["string","null"]},"content":str_}));
     let variants = vec![
+        object(json!({"type":{"type":"string","enum":["ask_generator"]}})),
         object(json!({"type":{"type":"string","enum":["list"]}})),
         object(json!({"type":{"type":"string","enum":["search"]},"query":str_})),
         object(

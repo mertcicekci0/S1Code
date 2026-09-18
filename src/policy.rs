@@ -62,6 +62,10 @@ pub fn revalidate(c: &CandidateAction, revision: &str) -> Result<()> {
         "action denied by deterministic policy"
     );
     ensure!(
+        c.class == classify(&c.action),
+        "candidate policy classification was altered"
+    );
+    ensure!(
         c.id == candidate(c.action.clone(), revision, "", vec![]).id,
         "candidate identity mismatch"
     );
