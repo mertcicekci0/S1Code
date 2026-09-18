@@ -38,7 +38,8 @@ pub enum Answer {
     },
     Score {
         score: f64,
-        legend: BTreeMap<String, String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        legend: Option<BTreeMap<String, String>>,
         probabilities: BTreeMap<String, f64>,
         confidence: f64,
     },
@@ -47,6 +48,8 @@ pub enum Answer {
 pub struct DecisionUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<f64>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DecisionResponse {
@@ -62,9 +65,18 @@ pub struct DecisionRequest {
 }
 
 pub fn validate(request: &DecisionRequest, response: &DecisionResponse) -> Result<()> {
+    validate_contract(request, response, true)
+}
+fn validate_contract(
+    request: &DecisionRequest,
+    response: &DecisionResponse,
+    require_legend: bool,
+) -> Result<()> {
     ensure!(
         response.model == request.model,
-        "resolved Jev model differs from pinned request; record and reconfigure explicitly"
+        "resolved Jev model changed: expected {}, received {}; inspect and update the pin explicitly",
+        request.model,
+        response.model
     );
     ensure!(
         request.questions.keys().eq(response.answers.keys()),
@@ -115,7 +127,9 @@ pub fn validate(request: &DecisionRequest, response: &DecisionResponse) -> Resul
                     .map(|(i, s)| (i.to_string(), s.clone()))
                     .collect();
                 ensure!(
-                    *legend == expected && legend.keys().eq(probabilities.keys()),
+                    (!require_legend || legend.is_some())
+                        && legend.as_ref().is_none_or(|l| *l == expected)
+                        && expected.keys().eq(probabilities.keys()),
                     "score legend/distribution mismatch"
                 );
                 distribution(probabilities)?;
@@ -136,6 +150,13 @@ pub fn validate(request: &DecisionRequest, response: &DecisionResponse) -> Resul
             _ => bail!("answer type does not match question"),
         }
     }
+    ensure!(
+        response
+            .usage
+            .cost
+            .is_none_or(|cost| cost.is_finite() && cost >= 0.0),
+        "invalid reported cost"
+    );
     Ok(())
 }
 fn unit(n: f64) -> Result<()> {
@@ -206,17 +227,75 @@ pub struct Jev {
     pub state_limit: usize,
     pub max_requests: u64,
     cache: BTreeMap<String, DecisionResponse>,
+    openrouter_resolved: Option<String>,
 }
+pub const OPENROUTER_MODEL: &str = "typesafe/jev-1.13";
+pub const OPENROUTER_RESOLVED: &str = "typesafe/jev-1.13-20260917";
 impl Jev {
+    pub fn from_config(config: &crate::domain::RunConfig) -> Result<Self> {
+        match config.jev_provider.as_str() {
+            "typesafe" => Self::from_env(
+                &config.jev_model,
+                config.jev_request_limit,
+                config.jev_state_limit,
+            ),
+            "openrouter" => Self::new_openrouter(
+                std::env::var("OPENROUTER_API_KEY").context(
+                    "OPENROUTER_API_KEY missing; OpenRouter and TypeSafe keys are separate",
+                )?,
+                &config.jev_model,
+                config
+                    .jev_resolved_model
+                    .as_deref()
+                    .unwrap_or(OPENROUTER_RESOLVED),
+                "https://openrouter.ai/api/alpha/decisions",
+                config.jev_request_limit,
+                config.jev_state_limit,
+            ),
+            _ => bail!("unsupported Jev provider"),
+        }
+    }
     pub fn from_env(model: &str, total: usize, state_limit: usize) -> Result<Self> {
+        let key = std::env::var("TYPESAFE_API_KEY").context("TYPESAFE_API_KEY missing; for OpenRouter use OPENROUTER_API_KEY and --jev-provider openrouter")?;
+        ensure!(
+            !key.starts_with("sk-or-"),
+            "OpenRouter keys do not authenticate TypeSafe directly; use OPENROUTER_API_KEY and --jev-provider openrouter"
+        );
         Self::new(
-            std::env::var("TYPESAFE_API_KEY")
-                .context("TYPESAFE_API_KEY missing; configure Jev separately")?,
+            key,
             model,
             "https://api.typesafe.ai/v1/systemone",
             total,
             state_limit,
         )
+    }
+    pub fn new_openrouter(
+        key: String,
+        model: &str,
+        resolved: &str,
+        endpoint: &str,
+        total: usize,
+        state_limit: usize,
+    ) -> Result<Self> {
+        ensure!(
+            model == OPENROUTER_MODEL,
+            "supported OpenRouter decision model is typesafe/jev-1.13; aliases are not reproducible"
+        );
+        let date = resolved.strip_prefix("typesafe/jev-1.13-").unwrap_or("");
+        ensure!(
+            date.len() == 8 && date.bytes().all(|b| b.is_ascii_digit()),
+            "pin the exact dated OpenRouter serving model with --jev-resolved-model"
+        );
+        let mut adapter = Self::new(
+            key,
+            "jev-1.13.0",
+            endpoint,
+            total.min(32_000),
+            state_limit.min(32_000),
+        )?;
+        adapter.model = model.into();
+        adapter.openrouter_resolved = Some(resolved.into());
+        Ok(adapter)
     }
     pub fn new(
         key: String,
@@ -246,6 +325,7 @@ impl Jev {
             state_limit,
             max_requests: 24,
             cache: Default::default(),
+            openrouter_resolved: None,
         })
     }
     pub async fn ask(
@@ -265,7 +345,22 @@ impl Jev {
             brand::POLICY_VERSION,
             "decision-rubric-1",
             &request,
+            &self.endpoint,
+            &self.openrouter_resolved,
         ))?);
+        let mut wire = serde_json::to_value(&request)?;
+        if self.openrouter_resolved.is_some() {
+            wire["provider"] = serde_json::json!({"only":["typesafe"],"allow_fallbacks":false});
+            // The gateway requires string descriptions; TypeSafe also permits null.
+            for (id, question) in &request.questions {
+                if let Question::Choice { criteria, .. } = question {
+                    for (option, meaning) in criteria {
+                        wire["questions"][id]["criteria"][option] =
+                            meaning.as_deref().unwrap_or(option).into();
+                    }
+                }
+            }
+        }
         if let Some(cached) = self.cache.get(&cache_key) {
             metrics.cache_hits += 1;
             return Ok(cached.clone());
@@ -281,7 +376,7 @@ impl Jev {
             if attempt > 0 {
                 metrics.retries += 1;
             }
-            let response = tokio::select! {biased;_=cancel.cancelled()=>bail!("decision cancelled"),r=self.client.post(&self.endpoint).bearer_auth(&self.key).json(&request).send()=>r};
+            let response = tokio::select! {biased;_=cancel.cancelled()=>bail!("decision cancelled"),r=self.client.post(&self.endpoint).bearer_auth(&self.key).json(&wire).send()=>r};
             match response {
                 Ok(mut response) => {
                     let status = response.status().as_u16();
@@ -300,7 +395,16 @@ impl Jev {
                             output_tokens: Some(parsed.usage.output_tokens),
                             cached_input_tokens: None,
                         });
-                        validate(&request, &parsed)?;
+                        if let Some(expected) = &self.openrouter_resolved {
+                            let validation_request = DecisionRequest {
+                                model: expected.clone(),
+                                state: request.state.clone(),
+                                questions: request.questions.clone(),
+                            };
+                            validate_contract(&validation_request, &parsed, false)?;
+                        } else {
+                            validate(&request, &parsed)?;
+                        }
                         if self.cache.len() >= 128 {
                             self.cache.clear();
                         }

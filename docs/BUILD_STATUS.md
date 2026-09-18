@@ -36,6 +36,10 @@ CI run occurred.
 - Four-view terminal with streaming, expandable activity, candidate/decision details,
   context, diff, approvals, resize and cancellation; JSONL headless mode uses the
   same native engine. Export strips known secrets/paths; every replay is labeled.
+- Version 0.1.1 adds readable approval cards, activity/decision summaries, colored
+  diffs, opt-in raw event inspection (`j`), human final summaries, and an honest
+  no-model offline header. Explicit OpenRouter Jev routing uses its alpha Decisions
+  API, a pinned serving build and OPENROUTER_API_KEY.
 - Offline parser demo with real failing/passing tests and patch approvals; real
   context-pressure demo without any model; five development and one held-out fixture;
   private evaluator with explicit live consent, matched settings and randomized order.
@@ -44,7 +48,7 @@ CI run occurred.
 
 ## Observed verification
 
-- 26 offline tests passed: real coding loop, three approvals, restart, traversal,
+- 30 offline tests passed: real coding loop, three approvals, restart, traversal,
   symlinks/ignored files, stale and tampered candidates, whole-patch prevalidation,
   recovery conflicts, fragmented/partial streams, permanent provider errors,
   retry exhaustion, exact cache invalidation, both Jev budgets, pinned overflow,
@@ -54,6 +58,8 @@ CI run occurred.
   transitive eviction/rehydration, restored file permissions, mixed SSE framing,
   stale verification after external edits, and execution of an already selected
   action at the provider request cap. Default live tests skip.
+  Added readable terminal rendering checks at 50/110 columns, streaming message
+  extraction, and OpenRouter contract/build-drift/missing-field tests.
 - Real PTY smoke test completed the parser task with three approvals, resized between
   50 and 110 columns, kept the simulation label visible, and restored the terminal.
 - Headless demo completed across approval/resume processes; real verification exit 0;
@@ -75,6 +81,9 @@ CI run occurred.
 
 ## Unverified or limited
 
+- OpenRouter gateway inference remains unverified; no paid request was made.
+  Managed ChatGPT account metadata was read successfully, which is not a full
+  delegated coding validation.
 - OpenAI and TypeSafe keys were absent. Live adapter compatibility, useful generated
   patches, actual Jev decisions/eviction quality, full managed login/logout completion
   and a delegated coding task remain unverified. Explicit live spend consent is needed.

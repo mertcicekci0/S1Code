@@ -77,11 +77,7 @@ impl Engine {
         }
         let mut jev =
             if self.session.config.decision == "jev" || self.session.config.eviction == "jev" {
-                Some(crate::decisions::Jev::from_env(
-                    &self.session.config.jev_model,
-                    self.session.config.jev_request_limit,
-                    self.session.config.jev_state_limit,
-                )?)
+                Some(crate::decisions::Jev::from_config(&self.session.config)?)
             } else {
                 None
             };
@@ -89,7 +85,7 @@ impl Engine {
             j.max_requests = self.session.config.max_provider_requests;
         }
         self.session.status = RunStatus::Running;
-        self.event("started",json!({"mode":"native","decision":self.session.config.decision,"model":self.session.config.generation_model,"simulation":self.session.config.offline_demo,"session":self.session.id}))?;
+        self.event("started",json!({"mode":"native","decision":self.session.config.decision,"decision_provider":self.session.config.jev_provider,"model":self.session.config.generation_model,"simulation":self.session.config.offline_demo,"session":self.session.id,"task":self.session.task}))?;
         while self.session.steps < self.session.config.max_steps {
             if self.cancel.is_cancelled() {
                 self.session.status = RunStatus::Cancelled;

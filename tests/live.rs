@@ -76,3 +76,34 @@ async fn jev_live_contract() {
     .unwrap();
     // Results stay in memory; do not publish provider measurements.
 }
+
+#[tokio::test]
+#[ignore = "billed OpenRouter decision request; needs OPENROUTER_API_KEY and explicit NERVE_LIVE_BUDGET_REQUESTS"]
+async fn openrouter_live_contract() {
+    let budget = std::env::var("NERVE_LIVE_BUDGET_REQUESTS")
+        .expect("explicit request spend consent required")
+        .parse::<u64>()
+        .unwrap();
+    assert!(budget > 0);
+    let config = nerve::domain::RunConfig {
+        jev_provider: "openrouter".into(),
+        jev_model: nerve::decisions::OPENROUTER_MODEL.into(),
+        ..Default::default()
+    };
+    let mut adapter = Jev::from_config(&config).unwrap();
+    adapter.max_requests = budget.min(3);
+    adapter
+        .ask(
+            json!({"task":"Fix parser", "evidence":"parse_count('42') returned 4"}),
+            BTreeMap::from([(
+                "relevant".into(),
+                Question::Noul {
+                    instructions: "Does the observed failure concern the parser task?".into(),
+                },
+            )]),
+            &CancellationToken::new(),
+            &mut Metrics::default(),
+        )
+        .await
+        .unwrap();
+}

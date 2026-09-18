@@ -43,6 +43,8 @@ pub struct EvalOptions {
     pub model: String,
     pub eviction: String,
     pub context_bytes: usize,
+    pub jev_provider: String,
+    pub jev_resolved_model: Option<String>,
 }
 
 fn retain_trace(source: &Path, destination: &Path) -> Result<()> {
@@ -115,8 +117,13 @@ pub async fn evaluate(
         );
         if opts.policies.iter().any(|p| p == "jev") || opts.eviction == "jev" {
             ensure!(
-                std::env::var_os("TYPESAFE_API_KEY").is_some(),
-                "TYPESAFE_API_KEY missing; Jev live validation unverified"
+                std::env::var_os(if opts.jev_provider == "openrouter" {
+                    "OPENROUTER_API_KEY"
+                } else {
+                    "TYPESAFE_API_KEY"
+                })
+                .is_some(),
+                "selected Jev provider key missing; live validation unverified"
             );
         }
     }
@@ -180,6 +187,13 @@ pub async fn evaluate(
                 max_provider_requests: per_trial_limit,
                 context_bytes: opts.context_bytes,
                 eviction: opts.eviction.clone(),
+                jev_provider: opts.jev_provider.clone(),
+                jev_model: if opts.jev_provider == "openrouter" {
+                    crate::decisions::OPENROUTER_MODEL.into()
+                } else {
+                    "jev-1.13.0".into()
+                },
+                jev_resolved_model: opts.jev_resolved_model.clone(),
                 ..Default::default()
             };
             let (store, s) = Store::create(&home, root.path(), fixture.task.clone(), config)?;
@@ -247,7 +261,7 @@ pub async fn evaluate(
             );
             status = json!("fixture_validated_not_agent_success");
         }
-        trials.push(json!({"task":fixture.id,"repeat":repeat,"trial_order":trial_no,"policy":policy,"mode":if opts.live{"native_live"}else{"OFFLINE_FIXTURE_VALIDATION"},"starting_tree_hash":hash(&serde_json::to_vec(&fixture.files)?),"starting_commit":null,"settings":{"generation_model":opts.model,"eviction":opts.eviction,"context_bytes":opts.context_bytes,"jev_model":"jev-1.13.0","max_provider_requests":per_trial_limit},"initial_protected_checks_passed":initial_pass,"protected_checks_passed":final_pass,"agent_success":if opts.live{Some(final_pass)}else{None},"status":status,"metrics":metrics,"wall_ms":start.elapsed().as_millis()}));
+        trials.push(json!({"task":fixture.id,"repeat":repeat,"trial_order":trial_no,"policy":policy,"mode":if opts.live{"native_live"}else{"OFFLINE_FIXTURE_VALIDATION"},"starting_tree_hash":hash(&serde_json::to_vec(&fixture.files)?),"starting_commit":null,"settings":{"generation_model":opts.model,"eviction":opts.eviction,"context_bytes":opts.context_bytes,"jev_provider":opts.jev_provider,"jev_model":if opts.jev_provider=="openrouter"{crate::decisions::OPENROUTER_MODEL}else{"jev-1.13.0"},"jev_resolved_model":if opts.jev_provider=="openrouter"{Some(opts.jev_resolved_model.as_deref().unwrap_or(crate::decisions::OPENROUTER_RESOLVED))}else{None},"max_provider_requests":per_trial_limit},"initial_protected_checks_passed":initial_pass,"protected_checks_passed":final_pass,"agent_success":if opts.live{Some(final_pass)}else{None},"status":status,"metrics":metrics,"wall_ms":start.elapsed().as_millis()}));
     }
     let mut git = tokio::process::Command::new("git");
     crate::tools::clean_environment(&mut git);

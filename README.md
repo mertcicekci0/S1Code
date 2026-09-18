@@ -64,6 +64,11 @@ integrations have local HTTP contract tests; billed inference was **not verified
 in the build environment because API keys were unavailable. See
 [implementation status](docs/BUILD_STATUS.md) before relying on a provider path.
 
+For an OpenRouter Jev key, use `OPENROUTER_API_KEY` and add
+`--decision jev --jev-provider openrouter`. This uses the dedicated Decisions API
+with a checked serving build, not chat completions. Native generation still needs
+its separate OpenAI API key. Managed ChatGPT login belongs to Codex bridge mode.
+
 Every native process and patch requires exact approval. Native execution is **not
 an OS sandbox**: repository tests/build scripts execute code with your user's
 filesystem/network access. Use trusted repositories or your own sandbox.

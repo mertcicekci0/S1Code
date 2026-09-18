@@ -17,6 +17,12 @@ Responses model for constrained action selection and counts those generation cal
 Each mode defaults to 40 steps, 12 generation calls, and 24 total provider requests.
 These are request caps, not dollar caps. Provider pricing/usage can vary.
 
+If your Jev key is from OpenRouter, use `OPENROUTER_API_KEY` and
+`--decision jev --jev-provider openrouter` instead. See providers.md for hidden key
+entry and the gateway's pinned serving build. To use your ChatGPT account, run
+`nerve account codex` or `nerve login codex`, then `nerve run "task" --mode codex`.
+This delegates execution to Codex; it does not enable native Jev selection.
+
 `--headless` emits only JSONL on stdout; diagnostics use stderr. Read an
 `approval_required` event, inspect its action/diff and candidate ID, then run
 `nerve resume ID --headless --approve CANDIDATE_ID`. A changed workspace invalidates
@@ -33,6 +39,10 @@ Terminal keys: `1` activity, `2` candidates/selection, `3` context, `4` diff;
 `↑`/`↓` select events, `Enter` expand/collapse, `PgUp`/`PgDn` scroll,
 `y`/`n` approve/deny, `Esc` or `Ctrl-C` cancel. After a run stops, press `q` to close
 and leave a copyable summary in the normal terminal.
+
+Approvals show the command or changed files in a dedicated card. Activity and
+decision views show readable summaries; `j` explicitly toggles the raw event for
+diagnostics. The offline demo header explicitly says that no model calls occur.
 
 Use `--exclude relative/path` to protect additional native paths. Hidden files,
 ignored files, symlinks, common secret names, dependency directories and `.git`

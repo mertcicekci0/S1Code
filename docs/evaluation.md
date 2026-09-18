@@ -57,6 +57,12 @@ without a model or scripted scoring answers. Retain task-success evidence alongs
 context size changes and cached token observations; prefix invalidations may cost
 more than eviction saves.
 
+`--jev-provider openrouter` selects the explicit gateway route for Jev trials and
+requires `OPENROUTER_API_KEY`. Reports record the route, request model and expected
+dated serving model; `--jev-resolved-model` changes that expected build explicitly.
+Do not mix gateway and direct-provider trials in a controlled comparison without
+recording the change. The generation provider remains matched across policies.
+
 Live trial traces retain events, checkpoints and hashed artifacts together. Output
 directories have private permissions and an ignore file; `eval-results/` is also
 gitignored at the project root. Do not commit

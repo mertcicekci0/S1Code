@@ -40,3 +40,10 @@ API field names implement public wire contracts. Newly authored code is Apache-2
 Reference snapshots and local protocol schemas were inspected outside the project.
 Provider documentation can change. Release claims require fresh agreement review
 and explicit live checks, not just mocked contract tests.
+
+2026-09-19 gateway follow-up: [OpenRouter OpenAPI](https://openrouter.ai/openapi.json),
+`DecisionsRequest`, `DecisionsResponse`, Choice/Noul/Score schemas and
+`/api/alpha/decisions`; [Jev model listing](https://openrouter.ai/typesafe/jev-1.13/)
+and public `/api/v1/models/typesafe/jev-1.13/endpoints` metadata. The served build
+was `typesafe/jev-1.13-20260917`. No third-party adapter implementation was copied.
+Local fixtures, not paid inference, validated this integration during development.

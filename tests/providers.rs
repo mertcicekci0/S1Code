@@ -157,6 +157,106 @@ async fn jev_real_http_shape_retry_and_exact_cache() {
 }
 
 #[tokio::test]
+async fn openrouter_decisions_use_own_contract_and_pin_resolved_build() {
+    let mut body = response();
+    body["model"] = OPENROUTER_RESOLVED.into();
+    body["provider"] = "TypeSafe".into();
+    body["usage"]["cost"] = json!(0.01); // Synthetic transport fixture, not a measurement.
+    body["answers"]["relevance"]
+        .as_object_mut()
+        .unwrap()
+        .remove("legend");
+    let (url, server) = mock(vec![(200, body.to_string())]).await;
+    let mut adapter = Jev::new_openrouter(
+        "test-router-key".into(),
+        OPENROUTER_MODEL,
+        OPENROUTER_RESOLVED,
+        &format!("{url}/api/alpha/decisions"),
+        64000,
+        32000,
+    )
+    .unwrap();
+    assert_eq!(adapter.total, 32000);
+    let r = request();
+    let mut metrics = Metrics::default();
+    let result = adapter
+        .ask(
+            r.state.clone(),
+            r.questions.clone(),
+            &CancellationToken::new(),
+            &mut metrics,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.model, OPENROUTER_RESOLVED);
+    assert_eq!(result.usage.cost, Some(0.01));
+    assert!(matches!(
+        &result.answers["relevance"],
+        Answer::Score { legend: None, .. }
+    ));
+    adapter
+        .ask(
+            r.state,
+            r.questions,
+            &CancellationToken::new(),
+            &mut metrics,
+        )
+        .await
+        .unwrap();
+    assert_eq!(metrics.cache_hits, 1);
+    let requests = server.await.unwrap();
+    assert!(requests[0].starts_with("POST /api/alpha/decisions "));
+    let sent: serde_json::Value =
+        serde_json::from_str(requests[0].split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(sent["model"], OPENROUTER_MODEL);
+    assert_eq!(
+        sent["provider"],
+        json!({"only":["typesafe"],"allow_fallbacks":false})
+    );
+    assert_eq!(sent["questions"]["pick"]["criteria"]["escape"], "escape");
+    assert!(sent.get("messages").is_none());
+}
+
+#[tokio::test]
+async fn openrouter_rejects_serving_drift_and_missing_confidence() {
+    for field in ["model", "confidence"] {
+        let mut body = response();
+        body["model"] = OPENROUTER_RESOLVED.into();
+        if field == "model" {
+            body["model"] = "typesafe/jev-1.13-20990101".into();
+        } else {
+            body["answers"]["pick"]
+                .as_object_mut()
+                .unwrap()
+                .remove("confidence");
+        }
+        let (url, server) = mock(vec![(200, body.to_string())]).await;
+        let mut adapter = Jev::new_openrouter(
+            "test".into(),
+            OPENROUTER_MODEL,
+            OPENROUTER_RESOLVED,
+            &url,
+            32000,
+            32000,
+        )
+        .unwrap();
+        let r = request();
+        assert!(
+            adapter
+                .ask(
+                    r.state,
+                    r.questions,
+                    &CancellationToken::new(),
+                    &mut Metrics::default()
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(server.await.unwrap().len(), 1);
+    }
+}
+
+#[tokio::test]
 async fn streaming_response_validates_terminal_and_structured_contract() {
     let body=[json!({"type":"response.output_text.delta","delta":"{\"message\":\"inspect\",\"actions\":["}),json!({"type":"response.output_text.delta","delta":"{\"type\":\"list\"}]}"}),json!({"type":"response.completed","response":{"status":"completed","model":"fixture","usage":{"input_tokens":10,"output_tokens":12,"input_tokens_details":{"cached_tokens":3}}}})].into_iter().map(|e|format!("data: {e}\n\n")).collect::<String>();
     let (url, server) = mock(vec![(200, body)]).await;

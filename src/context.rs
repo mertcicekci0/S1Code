@@ -74,7 +74,7 @@ pub fn excerpts(s: &Session, store: &Store) -> Result<Value> {
             .join("\n");
         out.push(json!({"artifact":c.artifact.hash,"action":c.action,"excerpt":bound(&text,900),"diagnostic_lines":bound(&diagnostics,900)}));
     }
-    Ok(json!({"task":s.task,"eligible":out}))
+    Ok(json!({"task":s.task,"current_workspace_revision":s.current_revision,"eligible":out}))
 }
 
 /// Trigger at 85%, aim for 65%; canonical artifacts are never removed.

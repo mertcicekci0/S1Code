@@ -6,6 +6,12 @@ sends focused decision evidence to TypeSafe. No silent cross-provider fallback i
 implemented. Provider processing/retention is governed by their agreements;
 `store:false` in Responses is not a general zero-retention guarantee.
 
+Choosing `--jev-provider openrouter` sends that decision evidence and the separately
+configured OpenRouter key to OpenRouter's Decisions API, restricted to the TypeSafe
+provider with fallback disabled. This is an explicit gateway choice; the key is not
+sent to the direct TypeSafe endpoint or child tools. OpenRouter is an additional
+processor under its own terms. The same private-result/export restrictions apply.
+
 Codex bridge mode sends the task to the official local runtime, which manages its
 own authentication and provider traffic. Nerve disables analytics in its child
 invocation, not in the user's account settings. Nerve does not read credential files.

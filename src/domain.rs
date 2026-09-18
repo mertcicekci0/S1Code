@@ -146,6 +146,10 @@ pub struct RunConfig {
     pub decision: String,
     pub generation_model: String,
     pub jev_model: String,
+    #[serde(default = "default_jev_provider")]
+    pub jev_provider: String,
+    #[serde(default)]
+    pub jev_resolved_model: Option<String>,
     pub max_steps: usize,
     pub max_generations: u64,
     #[serde(default = "default_requests")]
@@ -169,6 +173,8 @@ impl Default for RunConfig {
             decision: "rules".into(),
             generation_model: "gpt-4.1-2025-04-14".into(),
             jev_model: "jev-1.13.0".into(),
+            jev_provider: default_jev_provider(),
+            jev_resolved_model: None,
             max_steps: 40,
             max_generations: 12,
             max_provider_requests: 24,
@@ -187,6 +193,9 @@ impl Default for RunConfig {
 
 fn default_requests() -> u64 {
     24
+}
+fn default_jev_provider() -> String {
+    "typesafe".into()
 }
 fn default_retention() -> f64 {
     0.5

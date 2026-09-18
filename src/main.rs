@@ -34,8 +34,12 @@ struct RunArgs {
     decision: String,
     #[arg(long)]
     model: Option<String>,
-    #[arg(long, default_value = "jev-1.13.0")]
-    jev_model: String,
+    #[arg(long)]
+    jev_model: Option<String>,
+    #[arg(long, default_value = "typesafe", value_parser = ["typesafe", "openrouter"])]
+    jev_provider: String,
+    #[arg(long)]
+    jev_resolved_model: Option<String>,
     #[arg(long, default_value_t = 40)]
     max_steps: usize,
     #[arg(long, default_value_t = 12)]
@@ -99,6 +103,10 @@ enum Commands {
         eviction: String,
         #[arg(long, default_value_t = 96_000)]
         context_bytes: usize,
+        #[arg(long, default_value = "typesafe", value_parser = ["typesafe", "openrouter"])]
+        jev_provider: String,
+        #[arg(long)]
+        jev_resolved_model: Option<String>,
     },
     Doctor,
     Login {
@@ -167,7 +175,9 @@ async fn entry() -> Result<()> {
             mode: "native".into(),
             decision: "rules".into(),
             model: None,
-            jev_model: "jev-1.13.0".into(),
+            jev_model: None,
+            jev_provider: "typesafe".into(),
+            jev_resolved_model: None,
             max_steps: 40,
             max_generations: 12,
             max_provider_requests: 24,
@@ -185,6 +195,13 @@ async fn entry() -> Result<()> {
     match cmd {
         Commands::Run(a) => {
             ensure!(!a.task.trim().is_empty(), "task cannot be empty");
+            ensure!(
+                a.mode != "codex"
+                    || (a.decision == "rules"
+                        && a.eviction != "jev"
+                        && a.jev_provider == "typesafe"),
+                "Jev decision selection belongs to native mode. Codex bridge delegates tool selection and context to the official runtime; these Jev options cannot be applied there."
+            );
             ensure!(
                 [a.jev_confidence, a.jev_retention_threshold]
                     .iter()
@@ -205,7 +222,15 @@ async fn entry() -> Result<()> {
                         RunConfig::default().generation_model
                     }
                 }),
-                jev_model: a.jev_model,
+                jev_model: a.jev_model.unwrap_or_else(|| {
+                    if a.jev_provider == "openrouter" {
+                        nerve::decisions::OPENROUTER_MODEL.into()
+                    } else {
+                        "jev-1.13.0".into()
+                    }
+                }),
+                jev_provider: a.jev_provider,
+                jev_resolved_model: a.jev_resolved_model,
                 max_steps: a.max_steps,
                 max_generations: a.max_generations,
                 max_provider_requests: a.max_provider_requests,
@@ -301,6 +326,8 @@ async fn entry() -> Result<()> {
             model,
             eviction,
             context_bytes,
+            jev_provider,
+            jev_resolved_model,
         } => {
             let cancel = CancellationToken::new();
             let c = cancel.clone();
@@ -321,6 +348,8 @@ async fn entry() -> Result<()> {
                     model,
                     eviction,
                     context_bytes,
+                    jev_provider,
+                    jev_resolved_model,
                 },
                 &cancel,
             )
@@ -367,7 +396,7 @@ async fn entry() -> Result<()> {
             let diagnostic = compatibility.err().map(|e| e.to_string());
             println!(
                 "{}",
-                serde_json::json!({"name":brand::NAME,"version":env!("CARGO_PKG_VERSION"),"storage_version":brand::STORAGE_VERSION,"storage_writable":true,"openai_key_present":std::env::var_os("OPENAI_API_KEY").is_some(),"typesafe_key_present":std::env::var_os("TYPESAFE_API_KEY").is_some(),"codex_cli":codex,"codex_diagnostic":diagnostic,"codex_cli_compatible":codex.as_deref()==Some(nerve::bridge::TESTED_CLI),"codex_cli_expected":nerve::bridge::TESTED_CLI,"native_security":{"os_sandbox":false,"network_isolation":false,"process_groups":cfg!(unix),"exact_approval":true},"supported_platforms":["macOS","Linux"],"telemetry":false})
+                serde_json::json!({"name":brand::NAME,"version":env!("CARGO_PKG_VERSION"),"storage_version":brand::STORAGE_VERSION,"storage_writable":true,"openai_key_present":std::env::var_os("OPENAI_API_KEY").is_some(),"typesafe_key_present":std::env::var_os("TYPESAFE_API_KEY").is_some(),"openrouter_key_present":std::env::var_os("OPENROUTER_API_KEY").is_some(),"codex_cli":codex,"codex_diagnostic":diagnostic,"codex_cli_compatible":codex.as_deref()==Some(nerve::bridge::TESTED_CLI),"codex_cli_expected":nerve::bridge::TESTED_CLI,"native_security":{"os_sandbox":false,"network_isolation":false,"process_groups":cfg!(unix),"exact_approval":true},"supported_platforms":["macOS","Linux"],"telemetry":false})
             );
         }
         Commands::ContextDemo { workspace } => {
@@ -427,16 +456,20 @@ async fn drive(
         signal.cancel();
     });
     let interactive = !headless && io::stdin().is_terminal() && io::stdout().is_terminal();
-    let label = format!(
-        "{}native · {} · {}",
-        if s.config.offline_demo {
-            "OFFLINE SIMULATION · "
-        } else {
-            ""
-        },
-        s.config.generation_model,
-        s.config.decision
-    );
+    let label = if s.config.offline_demo {
+        "OFFLINE SIMULATION · real tools · no model calls".into()
+    } else {
+        format!(
+            "Native · {} · {}{}",
+            s.config.generation_model,
+            s.config.decision,
+            if s.config.decision == "jev" {
+                format!(" via {}", s.config.jev_provider)
+            } else {
+                String::new()
+            }
+        )
+    };
     let engine = Engine {
         workspace: workspace_for(&s)?,
         store,
@@ -474,9 +507,9 @@ async fn present(
         }
         if let Some(summary) = result? {
             println!(
-                "Session {}: {}",
+                "Session {}\n{}",
                 summary.session,
-                serde_json::to_string_pretty(&summary.data)?
+                nerve::ui::summary_text(&summary.data)
             );
         }
     } else {

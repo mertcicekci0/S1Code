@@ -47,6 +47,49 @@ default is to stop. It does not send code to another provider.
 batches independent retention questions against one snapshot with real excerpts.
 Dependent decisions are evaluated after observing new state.
 
+### Jev through OpenRouter
+
+Use `OPENROUTER_API_KEY` with `--decision jev --jev-provider openrouter`.
+OpenRouter keys cannot authenticate the direct TypeSafe endpoint. Nerve uses the
+official alpha Decisions endpoint, `https://openrouter.ai/api/alpha/decisions`,
+with `model`, `state`, and `questions`, not the chat-completions endpoint.
+Requests restrict routing to TypeSafe and disable provider fallback. No automatic
+switch between direct TypeSafe and OpenRouter is performed.
+
+The request model is `typesafe/jev-1.13`; the serving build is pinned to
+`typesafe/jev-1.13-20260917`, observed through OpenRouter's public endpoint metadata
+on 2026-09-19. `--jev-resolved-model` changes the expected dated serving build
+explicitly. A different returned build is rejected. The gateway's 32,000-token
+context limit caps both conservative request budgets. Score legends may be omitted
+by the gateway; their meaning is retained in the original question rubric, not
+invented as returned model data. Distribution/confidence fields needed by Nerve's
+policy must be present or the response is rejected. Reported gateway costs remain
+attached to the response and are not treated as total task cost.
+
+In zsh, enter the key without putting its value in shell history:
+
+```sh
+read -s 'OPENROUTER_API_KEY?OpenRouter API key: '
+echo
+export OPENROUTER_API_KEY
+nerve run "fix the parser and run tests" --mode native \
+  --decision jev --jev-provider openrouter --max-provider-requests 8
+```
+
+Native generation still requires `OPENAI_API_KEY`. Managed ChatGPT authentication
+is available in Codex bridge mode, whose tool selection is owned by Codex; Jev
+selection flags are rejected there instead of being silently ignored.
+
+An explicit billed gateway contract check is available:
+
+```sh
+NERVE_LIVE_BUDGET_REQUESTS=1 cargo test --test live openrouter_live_contract -- --ignored
+```
+
+This check was not run during implementation. Local HTTP fixtures verify the wire
+contract, build pin, missing-field errors and cache behavior. Alpha API support
+is not a claim of successful live inference.
+
 The [TypeSafe MCA](https://typesafe.ai/legal/mca) remains separate from Apache-2.0.
 Keep service measurements private until documented clearance. Do not use service
 outputs for imitation, distillation or competing model development. Renaming results
