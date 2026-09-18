@@ -16,6 +16,7 @@ directories = "6"
 fs2 = "0.4"
 futures-util = "0.3"
 ignore = "0.4"
+httpdate = "1"
 libc = "0.2"
 rand = "0.9"
 ratatui = "0.29"
@@ -35,4 +36,3 @@ tempfile = "3"
 [profile.release]
 lto = "thin"
 strip = true
-
