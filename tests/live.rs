@@ -107,3 +107,23 @@ async fn openrouter_live_contract() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+#[ignore = "one billed Claude generation request; needs ANTHROPIC_API_KEY and explicit S1CODE_LIVE_BUDGET_REQUESTS"]
+async fn claude_live_contract() {
+    use s1code::generation::Generator;
+    let budget: u64 = std::env::var("S1CODE_LIVE_BUDGET_REQUESTS")
+        .expect("explicit spend consent required")
+        .parse()
+        .unwrap();
+    assert!(budget > 0);
+    let model = std::env::var("S1CODE_LIVE_CLAUDE_MODEL")
+        .unwrap_or_else(|_| s1code::claude::DEFAULT_MODEL.into());
+    let generator = s1code::claude::Claude::from_env(&model).unwrap();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let result = generator.generate(
+        json!({"task":"Inspect the repository before proposing a small parser fix", "evidence":[]}),
+        &CancellationToken::new(),tx).await.unwrap();
+    assert!(!result.proposal.actions.is_empty());
+    // No generated actions execute. Outputs remain in memory and are not published.
+}

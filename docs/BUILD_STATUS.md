@@ -2,7 +2,7 @@
 
 **Runnable experimental v0 core. Full live release acceptance is not yet established.**
 The native API integrations are implemented and tested against local HTTP fixtures,
-but billed OpenAI/Jev inference and a complete delegated coding turn have not been
+but billed OpenAI/Claude/Jev inference and a complete delegated coding turn have not been
 verified. No performance claim, package publication, release upload, push, or hosted
 CI run occurred.
 
@@ -48,7 +48,7 @@ CI run occurred.
 
 ## Observed verification
 
-- 30 offline tests passed: real coding loop, three approvals, restart, traversal,
+- 37 offline tests passed: real coding loop, three approvals, restart, traversal,
   symlinks/ignored files, stale and tampered candidates, whole-patch prevalidation,
   recovery conflicts, fragmented/partial streams, permanent provider errors,
   retry exhaustion, exact cache invalidation, both Jev budgets, pinned overflow,
@@ -115,6 +115,7 @@ CI run occurred.
 scripts/check.sh
 cargo build --locked
 python3 scripts/terminal_smoke.py
+python3 scripts/home_smoke.py
 python3 scripts/headless_smoke.py
 cargo test --test live codex_local_protocol -- --ignored
 cargo run --locked -- eval --suite fixtures/core
@@ -126,10 +127,24 @@ S1CODE_LIVE_BUDGET_REQUESTS, then `cargo test --test live jev_live_contract -- -
 Use the documented `s1code eval --live` command for actual coding trials with both
 credentials and execution/request-budget consent. Keep results private.
 
-## 0.2.0 work in progress
+## 0.2.0 follow-up — implemented and locally verified
 
 - Product/package/executable renamed to S1Code / `s1code`; legacy v1 sessions
   are reused without destructive migration. The workspace lock namespace remains
   shared with old executables. All 31 offline tests passed after the rename.
-- Next: task-entry home screen, native Claude streaming adapter, provider selection,
-  corresponding protocol/UI tests and final release build. No new live inference.
+- Task-entry home screen opens with no inference, shows provider/auth/decision
+  ownership, accepts Unicode editing/paste and slash commands, handles missing keys,
+  lists/resumes sessions and returns after each task. New prompts start independent
+  tasks; there is no implied cross-task conversation memory.
+- Native Claude streaming Messages adapter, structured proposals, provider-persisted
+  resume and matched evaluator settings. Four new provider tests cover fragmented
+  streams/usage/hidden-content handling, invalid/partial/refused responses, in-flight
+  cancellation and a complete local-HTTP patch/real-test cycle with three approvals.
+- Explicit official Claude Code terminal handoff, separate from native or Codex
+  bridge ownership. The handoff process test uses a labeled local stub and confirms
+  no bypass/task arguments and no unrelated provider keys. Actual CLI version
+  2.1.266 was observed; authenticated Claude Code coding remains unverified.
+- Home/terminal rendering tests and PTY workflow checks passed; 37 offline tests,
+  formatting, clippy with warnings denied, release build and 228 dependency license
+  checks passed. No new dependencies were added. Four live tests remain opt-in;
+  no billed Claude/OpenAI/Jev or managed coding task was run in this follow-up.

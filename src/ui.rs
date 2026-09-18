@@ -29,11 +29,16 @@ use tokio_util::sync::CancellationToken;
 const ACCENT: Color = Color::Rgb(111, 211, 194);
 const MUTED: Color = Color::Rgb(151, 163, 177);
 const GOLD: Color = Color::Rgb(242, 199, 105);
-struct Restore;
+pub(crate) struct Restore;
 impl Drop for Restore {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        let _ = execute!(
+            io::stdout(),
+            crossterm::event::DisableBracketedPaste,
+            crossterm::cursor::Show,
+            LeaveAlternateScreen
+        );
     }
 }
 fn string<'a>(v: &'a Value, key: &str) -> &'a str {

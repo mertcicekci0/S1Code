@@ -4,11 +4,11 @@ use s1code::{
     brand, demo,
     domain::*,
     engine::{Engine, workspace_for},
-    generation::{Generator, Responses},
+    generation::{self, Generator},
     session::{Store, default_home},
 };
 use std::{
-    io::{self, IsTerminal, Write},
+    io::{self, IsTerminal},
     path::PathBuf,
     sync::Arc,
 };
@@ -34,6 +34,8 @@ struct RunArgs {
     decision: String,
     #[arg(long)]
     model: Option<String>,
+    #[arg(long, default_value = "openai", value_parser = ["openai", "claude"])]
+    provider: String,
     #[arg(long)]
     jev_model: Option<String>,
     #[arg(long, default_value = "typesafe", value_parser = ["typesafe", "openrouter"])]
@@ -97,8 +99,10 @@ enum Commands {
         repeat: usize,
         #[arg(long, default_value_t = 42)]
         seed: u64,
-        #[arg(long, default_value = "gpt-4.1-2025-04-14")]
-        model: String,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long, default_value = "openai", value_parser = ["openai", "claude"])]
+        provider: String,
         #[arg(long,default_value="conservative",value_parser=["conservative","jev","off"])]
         eviction: String,
         #[arg(long, default_value_t = 96_000)]
@@ -109,6 +113,11 @@ enum Commands {
         jev_resolved_model: Option<String>,
     },
     Doctor,
+    /// Open the unmodified official Claude Code UI. It owns auth, tools and history.
+    ClaudeCode {
+        #[arg(long, default_value = ".")]
+        workspace: PathBuf,
+    },
     Login {
         #[arg(value_parser=["codex"])]
         provider: String,
@@ -158,49 +167,25 @@ async fn main() {
 async fn entry() -> Result<()> {
     let cli = Cli::parse();
     let home = cli.home.unwrap_or(default_home()?);
-    let cmd = if let Some(cmd) = cli.command {
-        cmd
-    } else {
-        ensure!(
-            io::stdin().is_terminal(),
-            "provide a task: s1code run \"fix a bug\" --headless"
-        );
-        eprint!("S1Code · native / OpenAI Responses · task: ");
-        io::stderr().flush()?;
-        let mut task = String::new();
-        io::stdin().read_line(&mut task)?;
-        Commands::Run(RunArgs {
-            task: task.trim().into(),
-            workspace: ".".into(),
-            mode: "native".into(),
-            decision: "rules".into(),
-            model: None,
-            jev_model: None,
-            jev_provider: "typesafe".into(),
-            jev_resolved_model: None,
-            max_steps: 40,
-            max_generations: 12,
-            max_provider_requests: 24,
-            context_bytes: 96_000,
-            exclude: vec![],
-            headless: false,
-            jev_fallback_rules: false,
-            jev_confidence: 0.5,
-            jev_retention_threshold: 0.5,
-            jev_request_limit: 64_000,
-            jev_state_limit: 32_000,
-            eviction: "conservative".into(),
-        })
-    };
+    match cli.command {
+        Some(command) => execute(command, home).await,
+        None => interactive_home(home).await,
+    }
+}
+async fn execute(cmd: Commands, home: PathBuf) -> Result<()> {
     match cmd {
+        Commands::ClaudeCode { workspace } => {
+            s1code::external::claude_code(&workspace).await?;
+        }
         Commands::Run(a) => {
             ensure!(!a.task.trim().is_empty(), "task cannot be empty");
             ensure!(
                 a.mode != "codex"
                     || (a.decision == "rules"
                         && a.eviction != "jev"
-                        && a.jev_provider == "typesafe"),
-                "Jev decision selection belongs to native mode. Codex bridge delegates tool selection and context to the official runtime; these Jev options cannot be applied there."
+                        && a.jev_provider == "typesafe"
+                        && a.provider == "openai"),
+                "Codex owns generation, tool selection and context in bridge mode. Native Claude/Jev options cannot be applied there; select --mode native instead."
             );
             ensure!(
                 [a.jev_confidence, a.jev_retention_threshold]
@@ -219,9 +204,10 @@ async fn entry() -> Result<()> {
                     if a.mode == "codex" {
                         "codex-default".into()
                     } else {
-                        RunConfig::default().generation_model
+                        generation::default_model(&a.provider).into()
                     }
                 }),
+                generation_provider: a.provider,
                 jev_model: a.jev_model.unwrap_or_else(|| {
                     if a.jev_provider == "openrouter" {
                         s1code::decisions::OPENROUTER_MODEL.into()
@@ -245,7 +231,7 @@ async fn entry() -> Result<()> {
                 offline_demo: false,
             };
             let generator: Option<Arc<dyn Generator>> = if config.mode == Mode::Native {
-                Some(Arc::new(Responses::from_env(&config.generation_model)?))
+                Some(generation::from_config(&config)?)
             } else {
                 None
             };
@@ -310,7 +296,7 @@ async fn entry() -> Result<()> {
                     workspace: workspace_for(&s)?,
                 })
             } else {
-                Arc::new(Responses::from_env(&s.config.generation_model)?)
+                generation::from_config(&s.config)?
             };
             drive(store, s, generator, headless, approve).await?;
         }
@@ -324,6 +310,7 @@ async fn entry() -> Result<()> {
             repeat,
             seed,
             model,
+            provider,
             eviction,
             context_bytes,
             jev_provider,
@@ -345,7 +332,8 @@ async fn entry() -> Result<()> {
                     policies: decisions,
                     repeat,
                     seed,
-                    model,
+                    model: model.unwrap_or_else(|| generation::default_model(&provider).into()),
+                    generation_provider: provider,
                     eviction,
                     context_bytes,
                     jev_provider,
@@ -396,7 +384,7 @@ async fn entry() -> Result<()> {
             let diagnostic = compatibility.err().map(|e| e.to_string());
             println!(
                 "{}",
-                serde_json::json!({"name":brand::NAME,"version":env!("CARGO_PKG_VERSION"),"storage_version":brand::STORAGE_VERSION,"storage_writable":true,"openai_key_present":std::env::var_os("OPENAI_API_KEY").is_some(),"typesafe_key_present":std::env::var_os("TYPESAFE_API_KEY").is_some(),"openrouter_key_present":std::env::var_os("OPENROUTER_API_KEY").is_some(),"codex_cli":codex,"codex_diagnostic":diagnostic,"codex_cli_compatible":codex.as_deref()==Some(s1code::bridge::TESTED_CLI),"codex_cli_expected":s1code::bridge::TESTED_CLI,"native_security":{"os_sandbox":false,"network_isolation":false,"process_groups":cfg!(unix),"exact_approval":true},"supported_platforms":["macOS","Linux"],"telemetry":false})
+                serde_json::json!({"name":brand::NAME,"version":env!("CARGO_PKG_VERSION"),"storage_version":brand::STORAGE_VERSION,"storage_writable":true,"openai_key_present":std::env::var_os("OPENAI_API_KEY").is_some(),"anthropic_key_present":std::env::var_os("ANTHROPIC_API_KEY").is_some(),"typesafe_key_present":std::env::var_os("TYPESAFE_API_KEY").is_some(),"openrouter_key_present":std::env::var_os("OPENROUTER_API_KEY").is_some(),"codex_cli":codex,"codex_diagnostic":diagnostic,"codex_cli_compatible":codex.as_deref()==Some(s1code::bridge::TESTED_CLI),"codex_cli_expected":s1code::bridge::TESTED_CLI,"native_security":{"os_sandbox":false,"network_isolation":false,"process_groups":cfg!(unix),"exact_approval":true},"supported_platforms":["macOS","Linux"],"telemetry":false})
             );
         }
         Commands::ContextDemo { workspace } => {
@@ -440,6 +428,159 @@ async fn entry() -> Result<()> {
     Ok(())
 }
 
+fn home_run(task: String, settings: &s1code::home::Settings) -> RunArgs {
+    let delegated = settings.provider == "codex";
+    RunArgs {
+        task,
+        workspace: settings.workspace.clone(),
+        mode: if delegated { "codex" } else { "native" }.into(),
+        provider: if delegated {
+            "openai"
+        } else {
+            &settings.provider
+        }
+        .into(),
+        decision: if delegated {
+            "rules"
+        } else {
+            &settings.decision
+        }
+        .into(),
+        model: settings.model.clone(),
+        jev_model: None,
+        jev_provider: if delegated {
+            "typesafe"
+        } else {
+            &settings.jev_provider
+        }
+        .into(),
+        jev_resolved_model: None,
+        max_steps: 40,
+        max_generations: 12,
+        max_provider_requests: 24,
+        context_bytes: 96_000,
+        exclude: vec![],
+        headless: false,
+        jev_fallback_rules: false,
+        jev_confidence: 0.5,
+        jev_retention_threshold: 0.5,
+        jev_request_limit: 64_000,
+        jev_state_limit: 32_000,
+        eviction: "conservative".into(),
+    }
+}
+
+async fn interactive_home(home: PathBuf) -> Result<()> {
+    use s1code::home::{Command, Settings};
+    ensure!(
+        io::stdin().is_terminal() && io::stdout().is_terminal(),
+        "Use s1code run TASK --headless outside a terminal"
+    );
+    let mut settings = Settings::default();
+    let mut messages = vec![];
+    loop {
+        let command = s1code::home::prompt(&mut settings, &mut messages).await?;
+        let operation = match command {
+            Command::Exit => return Ok(()),
+            Command::Task(task) => {
+                messages.push(format!(
+                    "You: {}",
+                    s1code::privacy::Redactor::environment("").text(&task)
+                ));
+                Commands::Run(home_run(task, &settings))
+            }
+            Command::Resume(id, continue_task) => Commands::Resume {
+                id,
+                continue_task,
+                approve: None,
+                headless: false,
+                acknowledge_interruption: false,
+            },
+            Command::Login => Commands::Login {
+                provider: "codex".into(),
+            },
+            Command::Account => {
+                let cancel = CancellationToken::new();
+                match s1code::bridge::account("status", &cancel).await {
+                    Ok(value) => messages.push(format!(
+                        "S1Code: Codex account type: {} (credentials managed by official CLI)",
+                        value["account_type"].as_str().unwrap_or("not connected")
+                    )),
+                    Err(error) => messages.push(format!("S1Code: {error:#}")),
+                }
+                continue;
+            }
+            Command::Sessions => {
+                let rows = session_rows(&home);
+                messages.push(if rows.is_empty() {
+                    "S1Code: No saved tasks yet.".into()
+                } else {
+                    format!(
+                        "S1Code: Saved tasks (latest 8)\n{}\nUse /resume ID",
+                        rows.join("\n")
+                    )
+                });
+                continue;
+            }
+            Command::Demo => {
+                let workspace =
+                    std::env::temp_dir().join(format!("s1code-demo-{}", uuid::Uuid::new_v4()));
+                messages.push(format!(
+                    "S1Code: OFFLINE SIMULATION in {}. Real file tools; no model calls.",
+                    workspace.display()
+                ));
+                Commands::Demo {
+                    workspace,
+                    offline: true,
+                    headless: false,
+                }
+            }
+            Command::ClaudeCode => Commands::ClaudeCode {
+                workspace: settings.workspace.clone(),
+            },
+        };
+        let task_operation = matches!(
+            operation,
+            Commands::Run(_) | Commands::Resume { .. } | Commands::Demo { .. }
+        );
+        match execute(operation, home.clone()).await {
+            Ok(()) => {
+                if task_operation {
+                    let rows = session_rows(&home);
+                    messages.push(format!("S1Code: Task view closed. Latest saved task:\n{}\nType another task, or /resume ID. New prompts start independent tasks.", rows.first().map(String::as_str).unwrap_or("No session created")));
+                } else {
+                    messages.push("S1Code: Returned to task entry. /account checks Codex login; /help lists commands.".into());
+                }
+            }
+            Err(error) => messages.push(format!("S1Code: {error:#}")),
+        }
+    }
+}
+
+fn session_rows(home: &std::path::Path) -> Vec<String> {
+    let mut rows = vec![];
+    if let Ok(entries) = std::fs::read_dir(home.join("sessions")) {
+        for entry in entries.flatten() {
+            let path = entry.path().join("checkpoint.json");
+            if let Ok(bytes) = std::fs::read(&path)
+                && let Ok(session) = serde_json::from_slice::<Session>(&bytes)
+            {
+                rows.push((
+                    path.metadata().and_then(|m| m.modified()).ok(),
+                    format!(
+                        "{} · {:?} · {}",
+                        session.id,
+                        session.status,
+                        s1code::tools::bound(&session.task, 120)
+                    ),
+                ));
+            }
+        }
+    }
+    rows.sort_by(|a, b| b.0.cmp(&a.0));
+    rows.into_iter().take(8).map(|(_, row)| row).collect()
+}
+
 async fn drive(
     store: Store,
     s: Session,
@@ -460,7 +601,8 @@ async fn drive(
         "OFFLINE SIMULATION · real tools · no model calls".into()
     } else {
         format!(
-            "Native · {} · {}{}",
+            "Native · {} / {} · {}{}",
+            s.config.generation_provider,
             s.config.generation_model,
             s.config.decision,
             if s.config.decision == "jev" {

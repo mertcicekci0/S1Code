@@ -16,6 +16,41 @@ next actions, not a queued program. Actions are tagged `list`, `search`, `read`,
 providers never execute tools. No hidden reasoning is requested or displayed.
 Failures never trigger an implicit provider change or a Codex delegation.
 
+## Native Claude generation
+
+Choose `--provider claude` (or `/provider claude` on the home screen) and set
+`ANTHROPIC_API_KEY`. S1Code calls `POST https://api.anthropic.com/v1/messages` with
+`x-api-key`, `anthropic-version: 2023-06-01`, `stream: true`, and
+`output_config.format` JSON schema. The provider returns the same bounded proposal
+contract as OpenAI; it executes no tools. There is no hidden Claude Code runtime
+in this mode. Jev works with either native generation provider.
+
+The configurable default is `claude-sonnet-5`, listed in the official model docs
+reviewed on 2026-09-19. Account availability and billed inference are unverified.
+The adapter checks message/block ordering, fragmented UTF-8/SSE, final stop reason,
+structured proposals, bounded output and cancellation. Refusal, truncated output,
+HTTP/stream errors, unexpected tools and incomplete streams cannot create actions.
+Thinking content is never shown or stored. Failures do not switch providers.
+
+Usage retains provider-reported fields: Claude `input_tokens` excludes cached reads
+and cache creation; these are separately recorded as `cached_input_tokens` and
+`cache_creation_input_tokens`. OpenAI input tokens include its cached subset.
+Do not add overlapping fields or compare raw input counts without normalization.
+Missing counts stay unknown. Output deltas carry cumulative counts, not additions.
+Native requests have a 180-second deadline and are not automatically retried.
+
+```sh
+read -s 'ANTHROPIC_API_KEY?Anthropic API key: '
+echo
+export ANTHROPIC_API_KEY
+s1code run "fix the parser and run tests" --provider claude \
+  --decision jev --jev-provider openrouter --max-provider-requests 8
+```
+
+The Jev key is separate. A single billed Claude contract check requires explicit
+consent: `S1CODE_LIVE_BUDGET_REQUESTS=1 cargo test --test live claude_live_contract -- --ignored`.
+This check was not run during development; it executes no proposed local actions.
+
 ## Jev decisions
 
 `TYPESAFE_API_KEY` authenticates `POST https://api.typesafe.ai/v1/systemone` with
@@ -76,7 +111,7 @@ s1code run "fix the parser and run tests" --mode native \
   --decision jev --jev-provider openrouter --max-provider-requests 8
 ```
 
-Native generation still requires `OPENAI_API_KEY`. Managed ChatGPT authentication
+Native generation requires `OPENAI_API_KEY` for OpenAI or `ANTHROPIC_API_KEY` for Claude. Managed ChatGPT authentication
 is available in Codex bridge mode, whose tool selection is owned by Codex; Jev
 selection flags are rejected there instead of being silently ignored.
 
@@ -139,8 +174,29 @@ notes observed upstream verification evidence, not proof of task correctness.
 CLI protocol/account checks and local protocol fixtures are separate from billed
 inference checks. See BUILD_STATUS.md for the actual verification results.
 
+## Official Claude Code terminal handoff
+
+`s1code claude-code --workspace PATH` or `/claude-code` opens the installed official
+`claude` executable unchanged, interactively, with no task or permission-bypass flags.
+Its own sign-in flow can use the user's eligible subscription or API key. S1Code
+neither reads nor stores its tokens, implements Claude.ai login, nor routes model
+requests through subscription credentials. The terminal returns after Claude Code
+exits. This is a handoff, not the native loop or a persisted S1Code bridge: Jev is
+inactive, and tools, approval settings, sandbox, telemetry, history and resumption
+belong to Claude Code. Use Claude Code's own controls. No S1Code metrics are invented.
+Unrelated provider keys are removed from the child environment; an explicitly
+configured ANTHROPIC_API_KEY is available to the official client that needs it.
+The local `claude --version` reported 2.1.266; no billed Claude Code task was run.
+
+The current [Anthropic authentication rules](https://code.claude.com/docs/en/legal-and-compliance)
+distinguish end users signing into the unmodified official binary from third-party
+applications collecting tokens or routing requests through subscription accounts.
+Native S1Code Claude generation uses the public API, not a subscription-token adapter.
+Jev always uses its separately billed TypeSafe/OpenRouter service. There is no built-in
+mode where Jev replaces Codex or Claude Code's internal action selection.
+
 ## Unsupported authentication
 
-No Claude.ai subscription login, credential scraping, copied OAuth clients, or
-Gemini/Copilot/Claude OAuth adapter exists. Future integrations must use supported
-authentication and a real provider contract, not an empty backend for optics.
+No credential scraping, copied OAuth clients, third-party Claude.ai login, or
+Gemini/Copilot OAuth adapter exists. Cloud-native Claude API authentication is not
+implemented; this release's native Claude adapter uses ANTHROPIC_API_KEY.

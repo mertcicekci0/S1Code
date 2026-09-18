@@ -1,5 +1,12 @@
 # Demonstration
 
+## Normal task entry
+
+Run `./target/release/s1code` to open the real task-entry screen. This is not a
+simulation. Opening it makes no model call; submitting a task uses the visibly
+selected provider. `/demo` explicitly enters the offline fixture in a fresh temporary
+workspace, and closing its task view returns home. `/help` lists provider setup.
+
 ## Interactive offline coding path
 
 ```sh
@@ -82,5 +89,7 @@ label. Jev traces are deliberately blocked from this export path pending clearan
 
 For repeatable CLI and terminal checks after `cargo build --locked`, run
 `python3 scripts/headless_smoke.py` and `python3 scripts/terminal_smoke.py`.
-Both create disposable fixtures and authorize only their known demo actions.
+The additional `python3 scripts/home_smoke.py` checks task entry and return, missing
+credentials, resize, and a clearly labeled process stub for the external handoff.
+These checks create disposable fixtures and authorize only their known demo actions.
 They exercise the labeled offline driver with real tools; neither uses a provider.

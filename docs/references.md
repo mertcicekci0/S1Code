@@ -47,3 +47,17 @@ and explicit live checks, not just mocked contract tests.
 and public `/api/v1/models/typesafe/jev-1.13/endpoints` metadata. The served build
 was `typesafe/jev-1.13-20260917`. No third-party adapter implementation was copied.
 Local fixtures, not paid inference, validated this integration during development.
+
+2026-09-19 Claude and entry-screen follow-up: official
+[Messages API](https://platform.claude.com/docs/en/api/messages/create),
+[stream event contract](https://platform.claude.com/docs/en/build-with-claude/streaming),
+[structured output contract](https://platform.claude.com/docs/en/build-with-claude/structured-outputs),
+[model IDs](https://platform.claude.com/docs/en/models/overview),
+[Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference), and
+[authentication and credential rules](https://code.claude.com/docs/en/legal-and-compliance).
+Reviewed `message_start`, content blocks/deltas/stops, `message_delta`, `message_stop`,
+usage, refusals and `output_config.format`. Implemented independently; no upstream
+implementation copied. Official local `claude --version`: 2.1.266. Rechecked official
+Codex App Server managed `account/login/start`/`account/read` documentation. Native
+Claude and handoff process tests use clearly identified local fixtures, not billed
+provider inference or an authenticated Claude Code coding task.

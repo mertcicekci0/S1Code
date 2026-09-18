@@ -20,8 +20,9 @@ Sessions contain task text, actions, patches, events, verification, local worksp
 paths and content-addressed captured evidence. The data directory is private to the
 user on Unix (directory mode 0700); data is not encrypted. The default is the OS local
 data directory for `s1code`; `S1CODE_HOME` or `--home` overrides it. Storage schema is
-versioned independently of the brand. There is no automatic migration; future moves
-must validate version 1 records and preserve artifacts and hashes.
+versioned independently of the brand. Existing legacy stores are reused in place
+when the new store is absent; NERVE_HOME remains a compatibility override. No
+automatic move or merge occurs. See architecture.md for selection precedence.
 
 Known environment secrets and personal paths are removed from event display/export.
 Raw patch backups and canonical source evidence can contain incidental secrets not
@@ -37,3 +38,12 @@ a custom output outside the checkout remains your responsibility.
 `s1code delete ID` removes that local session and its artifacts. Backups, exported
 traces and provider-side records are separate. Native workspace locks contain no
 source. Deleting a S1Code session does not delete an official Codex thread or log out.
+
+Native `--provider claude` sends focused task/context evidence to Anthropic's public
+Messages API under the API key owner's agreement. Provider changes are explicit;
+Claude failures never send evidence to OpenAI. Provider secrets are excluded from
+native tools. The home screen sends no task until the user submits one.
+
+The optional official Claude Code handoff delegates the terminal itself. Its own
+client settings govern its traffic and telemetry; S1Code does not intercept them.
+S1Code does not capture that application's session or credentials.

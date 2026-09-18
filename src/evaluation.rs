@@ -2,7 +2,7 @@
 use crate::{
     domain::*,
     engine::{Engine, workspace_for},
-    generation::Responses,
+    generation,
     session::{Store, atomic_write, hash, private_dir},
     tools::{Workspace, process},
 };
@@ -13,7 +13,6 @@ use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     path::Path,
-    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::sync::mpsc;
@@ -41,6 +40,7 @@ pub struct EvalOptions {
     pub repeat: usize,
     pub seed: u64,
     pub model: String,
+    pub generation_provider: String,
     pub eviction: String,
     pub context_bytes: usize,
     pub jev_provider: String,
@@ -112,8 +112,13 @@ pub async fn evaluate(
             "live trials require --live-budget-requests N: explicit total billable request consent"
         );
         ensure!(
-            std::env::var_os("OPENAI_API_KEY").is_some(),
-            "OPENAI_API_KEY missing; live validation unverified"
+            std::env::var_os(if opts.generation_provider == "claude" {
+                "ANTHROPIC_API_KEY"
+            } else {
+                "OPENAI_API_KEY"
+            })
+            .is_some(),
+            "selected generation provider API key missing; live validation unverified"
         );
         if opts.policies.iter().any(|p| p == "jev") || opts.eviction == "jev" {
             ensure!(
@@ -184,6 +189,7 @@ pub async fn evaluate(
             let config = RunConfig {
                 decision: policy.clone(),
                 generation_model: opts.model.clone(),
+                generation_provider: opts.generation_provider.clone(),
                 max_provider_requests: per_trial_limit,
                 context_bytes: opts.context_bytes,
                 eviction: opts.eviction.clone(),
@@ -196,8 +202,8 @@ pub async fn evaluate(
                 jev_resolved_model: opts.jev_resolved_model.clone(),
                 ..Default::default()
             };
+            let generator = generation::from_config(&config)?;
             let (store, s) = Store::create(&home, root.path(), fixture.task.clone(), config)?;
-            let generator = Arc::new(Responses::from_env(&opts.model)?);
             let (tx, mut rx) = mpsc::unbounded_channel();
             let (input, inputs) = mpsc::unbounded_channel();
             let engine = Engine {
@@ -261,7 +267,7 @@ pub async fn evaluate(
             );
             status = json!("fixture_validated_not_agent_success");
         }
-        trials.push(json!({"task":fixture.id,"repeat":repeat,"trial_order":trial_no,"policy":policy,"mode":if opts.live{"native_live"}else{"OFFLINE_FIXTURE_VALIDATION"},"starting_tree_hash":hash(&serde_json::to_vec(&fixture.files)?),"starting_commit":null,"settings":{"generation_model":opts.model,"eviction":opts.eviction,"context_bytes":opts.context_bytes,"jev_provider":opts.jev_provider,"jev_model":if opts.jev_provider=="openrouter"{crate::decisions::OPENROUTER_MODEL}else{"jev-1.13.0"},"jev_resolved_model":if opts.jev_provider=="openrouter"{Some(opts.jev_resolved_model.as_deref().unwrap_or(crate::decisions::OPENROUTER_RESOLVED))}else{None},"max_provider_requests":per_trial_limit},"initial_protected_checks_passed":initial_pass,"protected_checks_passed":final_pass,"agent_success":if opts.live{Some(final_pass)}else{None},"status":status,"metrics":metrics,"wall_ms":start.elapsed().as_millis()}));
+        trials.push(json!({"task":fixture.id,"repeat":repeat,"trial_order":trial_no,"policy":policy,"mode":if opts.live{"native_live"}else{"OFFLINE_FIXTURE_VALIDATION"},"starting_tree_hash":hash(&serde_json::to_vec(&fixture.files)?),"starting_commit":null,"settings":{"generation_model":opts.model,"generation_provider":opts.generation_provider,"eviction":opts.eviction,"context_bytes":opts.context_bytes,"jev_provider":opts.jev_provider,"jev_model":if opts.jev_provider=="openrouter"{crate::decisions::OPENROUTER_MODEL}else{"jev-1.13.0"},"jev_resolved_model":if opts.jev_provider=="openrouter"{Some(opts.jev_resolved_model.as_deref().unwrap_or(crate::decisions::OPENROUTER_RESOLVED))}else{None},"max_provider_requests":per_trial_limit},"initial_protected_checks_passed":initial_pass,"protected_checks_passed":final_pass,"agent_success":if opts.live{Some(final_pass)}else{None},"status":status,"metrics":metrics,"wall_ms":start.elapsed().as_millis()}));
     }
     let mut git = tokio::process::Command::new("git");
     crate::tools::clean_environment(&mut git);

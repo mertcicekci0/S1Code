@@ -94,6 +94,8 @@ pub struct Usage {
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
     pub cached_input_tokens: Option<u64>,
+    #[serde(default)]
+    pub cache_creation_input_tokens: Option<u64>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -145,6 +147,8 @@ pub struct RunConfig {
     pub mode: Mode,
     pub decision: String,
     pub generation_model: String,
+    #[serde(default = "default_generation_provider")]
+    pub generation_provider: String,
     pub jev_model: String,
     #[serde(default = "default_jev_provider")]
     pub jev_provider: String,
@@ -172,6 +176,7 @@ impl Default for RunConfig {
             mode: Mode::Native,
             decision: "rules".into(),
             generation_model: "gpt-4.1-2025-04-14".into(),
+            generation_provider: default_generation_provider(),
             jev_model: "jev-1.13.0".into(),
             jev_provider: default_jev_provider(),
             jev_resolved_model: None,
@@ -193,6 +198,9 @@ impl Default for RunConfig {
 
 fn default_requests() -> u64 {
     24
+}
+fn default_generation_provider() -> String {
+    "openai".into()
 }
 fn default_jev_provider() -> String {
     "typesafe".into()

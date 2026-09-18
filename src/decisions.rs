@@ -394,6 +394,7 @@ impl Jev {
                             input_tokens: Some(parsed.usage.input_tokens),
                             output_tokens: Some(parsed.usage.output_tokens),
                             cached_input_tokens: None,
+                            cache_creation_input_tokens: None,
                         });
                         if let Some(expected) = &self.openrouter_resolved {
                             let validation_request = DecisionRequest {

@@ -68,3 +68,12 @@ directories have private permissions and an ignore file; `eval-results/` is also
 gitignored at the project root. Do not commit
 or publish Jev measurements without documented provider clearance. The evaluator
 ships no comparative performance table and no claim of lower cost or latency.
+
+Native Claude comparisons use `--provider claude` and an explicit `--model` when
+running `s1code eval --live ...`; set ANTHROPIC_API_KEY instead of OPENAI_API_KEY.
+All compared decision policies share that provider/model. Reports include the
+provider. Claude input tokens exclude cached reads/writes, which are recorded
+separately; OpenAI input tokens include its cached subset. Unknown fields remain
+null. Do not compare/sum these fields without normalizing their semantics.
+The official Claude Code terminal handoff is outside this evaluator; its turns,
+usage, approvals and success are not recorded as native S1Code measurements.

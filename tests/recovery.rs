@@ -447,5 +447,10 @@ fn renamed_brand_preserves_existing_store_without_merging() {
         .as_object_mut()
         .unwrap()
         .remove("generation_provider");
-    assert!(serde_json::from_value::<RunConfig>(config).is_ok());
+    assert_eq!(
+        serde_json::from_value::<RunConfig>(config)
+            .unwrap()
+            .generation_provider,
+        "openai"
+    );
 }

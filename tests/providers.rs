@@ -335,3 +335,242 @@ async fn missing_completion_and_pre_cancelled_requests_fail_closed() {
     let error = provider.generate(json!({}), &c, tx).await.err().unwrap();
     assert!(error.to_string().contains("cancelled"));
 }
+
+fn claude_events(text: &str, stop: &str) -> Vec<serde_json::Value> {
+    vec![
+        json!({"type":"message_start","message":{"model":"claude-fixture","content":[],"usage":{"input_tokens":20,"output_tokens":1,"cache_read_input_tokens":3,"cache_creation_input_tokens":5}}}),
+        json!({"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}),
+        json!({"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"private-not-for-display"}}),
+        json!({"type":"content_block_stop","index":0}),
+        json!({"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}),
+        json!({"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":text}}),
+        json!({"type":"content_block_stop","index":1}),
+        json!({"type":"message_delta","delta":{"stop_reason":stop},"usage":{"output_tokens":8}}),
+        json!({"type":"message_stop"}),
+    ]
+}
+fn claude_wire(events: Vec<serde_json::Value>) -> String {
+    events
+        .into_iter()
+        .map(|v| {
+            format!(
+                "event: {}\r\ndata: {v}\r\n\r\n",
+                v["type"].as_str().unwrap()
+            )
+        })
+        .collect()
+}
+#[tokio::test]
+async fn claude_stream_contract_usage_and_hidden_content() {
+    let text = json!({"message":"İncele","actions":[{"type":"list"}]}).to_string();
+    let (url, server) = mock(vec![(200, claude_wire(claude_events(&text, "end_turn")))]).await;
+    let generator =
+        s1code::claude::Claude::new("fixture-anthropic-key".into(), "claude-fixture", &url)
+            .unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let response = generator
+        .generate(json!({"task":"inspect"}), &CancellationToken::new(), tx)
+        .await
+        .unwrap();
+    assert_eq!(response.proposal.message, "İncele");
+    assert_eq!(response.usage.output_tokens, Some(8)); // Cumulative, not 1 + 8.
+    assert_eq!(response.usage.cached_input_tokens, Some(3));
+    assert_eq!(response.usage.cache_creation_input_tokens, Some(5));
+    let mut rendered = String::new();
+    while let Some(delta) = rx.recv().await {
+        rendered.push_str(&delta);
+    }
+    assert_eq!(rendered, text);
+    assert!(!rendered.contains("private-not-for-display"));
+    let requests = server.await.unwrap();
+    assert!(requests[0].contains("x-api-key: fixture-anthropic-key"));
+    assert!(requests[0].contains("anthropic-version: 2023-06-01"));
+    assert!(!requests[0].contains("authorization:"));
+    let body: serde_json::Value =
+        serde_json::from_str(requests[0].split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(body["output_config"]["format"]["type"], "json_schema");
+    assert_eq!(body["stream"], true);
+    assert!(body.get("tools").is_none());
+    assert!(
+        !body["output_config"]["format"]["schema"]
+            .to_string()
+            .contains("\"minimum\"")
+    );
+}
+#[tokio::test]
+async fn claude_rejects_partial_refused_or_malformed_streams() {
+    let text = json!({"message":"inspect","actions":[{"type":"list"}]}).to_string();
+    let valid = claude_events(&text, "end_turn");
+    let mut absent_stop = valid.clone();
+    absent_stop.pop();
+    let mut orphan_delta = valid.clone();
+    orphan_delta.remove(4);
+    let mut duplicate_start = valid.clone();
+    duplicate_start.insert(1, valid[0].clone());
+    let mut index_mismatch = valid.clone();
+    index_mismatch[5]["index"] = json!(99);
+    let mut tool_block = valid.clone();
+    tool_block[4]["content_block"]["type"] = "tool_use".into();
+    let mut late_text = valid.clone();
+    late_text.push(valid[5].clone());
+    let mut cases = vec![
+        absent_stop,
+        orphan_delta,
+        duplicate_start,
+        index_mismatch,
+        tool_block,
+        late_text,
+        claude_events(&text, "max_tokens"),
+        claude_events(&text, "refusal"),
+        claude_events("not JSON", "end_turn"),
+        vec![json!({"type":"error"})],
+    ]
+    .into_iter()
+    .map(claude_wire)
+    .collect::<Vec<_>>();
+    cases.push(format!("{}data: {{", claude_wire(valid)));
+    for body in cases {
+        let (url, server) = mock(vec![(200, body)]).await;
+        let generator =
+            s1code::claude::Claude::new("fixture-key".into(), "claude-fixture", &url).unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        assert!(
+            generator
+                .generate(json!({}), &CancellationToken::new(), tx)
+                .await
+                .is_err()
+        );
+        server.await.unwrap();
+    }
+}
+#[tokio::test]
+async fn claude_cancellation_interrupts_an_in_progress_request() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (seen, received) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buf = [0; 4096];
+        assert!(socket.read(&mut buf).await.unwrap() > 0);
+        let _ = seen.send(());
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+    });
+    let generator = s1code::claude::Claude::new(
+        "fixture".into(),
+        "claude-fixture",
+        &format!("http://{addr}"),
+    )
+    .unwrap();
+    let cancel = CancellationToken::new();
+    let token = cancel.clone();
+    let task = tokio::spawn(async move {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        generator.generate(json!({}), &token, tx).await
+    });
+    received.await.unwrap();
+    cancel.cancel();
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(1), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_err()
+    );
+    server.abort();
+    let (url, server) = mock(vec![(401, "do-not-print-provider-body".into())]).await;
+    let generator = s1code::claude::Claude::new("fixture".into(), "claude-fixture", &url).unwrap();
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let error = generator
+        .generate(json!({}), &CancellationToken::new(), tx)
+        .await
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(error.contains("401") && !error.contains("do-not-print-provider-body"));
+    assert_eq!(server.await.unwrap().len(), 1);
+}
+#[tokio::test]
+async fn claude_http_fixture_drives_native_patch_and_real_verification() {
+    use s1code::{
+        domain::*,
+        engine::{Engine, workspace_for},
+        session::{Store, hash},
+    };
+    let root = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    s1code::demo::fixture(root.path()).unwrap();
+    let original = std::fs::read_to_string(root.path().join("parser.py")).unwrap();
+    let patch = original.replace("int(text.strip()[0])", "int(text.strip())");
+    let run = json!({"type":"run","argv":["python3","-m","unittest","-v"],"verification":true});
+    let actions = [
+        run.clone(),
+        json!({"type":"read","path":"parser.py","start":1,"lines":40}),
+        json!({"type":"patch","edits":[{"path":"parser.py","before_hash":hash(original.as_bytes()),"content":patch}]}),
+        run,
+        json!({"type":"finish","summary":"Fixture checks passed"}),
+    ];
+    let bodies = actions
+        .iter()
+        .map(|a| {
+            (
+                200,
+                claude_wire(claude_events(
+                    &json!({"message":"Local protocol fixture; not live inference","actions":[a]})
+                        .to_string(),
+                    "end_turn",
+                )),
+            )
+        })
+        .collect();
+    let (url, server) = mock(bodies).await;
+    let config = RunConfig {
+        generation_provider: "claude".into(),
+        generation_model: "claude-fixture".into(),
+        ..Default::default()
+    };
+    let (store, session) =
+        Store::create(home.path(), root.path(), s1code::demo::TASK.into(), config).unwrap();
+    let (events, mut rx) = mpsc::unbounded_channel();
+    let (tx, input) = mpsc::unbounded_channel();
+    let engine = Engine {
+        workspace: workspace_for(&session).unwrap(),
+        store,
+        session,
+        generator: std::sync::Arc::new(
+            s1code::claude::Claude::new("fixture".into(), "claude-fixture", &url).unwrap(),
+        ),
+        cancel: CancellationToken::new(),
+        events,
+        input,
+        interactive: true,
+        approved: None,
+    };
+    let task = tokio::spawn(engine.run());
+    let mut approvals = 0;
+    let mut failed_checks = 0;
+    while let Some(event) = rx.recv().await {
+        if event.kind == "approval_required" {
+            approvals += 1;
+            tx.send(UiInput::Approve(
+                event.data["candidate"]["id"].as_str().unwrap().into(),
+            ))
+            .unwrap();
+        }
+        if event.kind == "tool_result" && event.data["exit_code"] == 1 {
+            failed_checks += 1;
+        }
+    }
+    let session = task.await.unwrap().unwrap();
+    assert_eq!(session.status, RunStatus::Completed);
+    assert_eq!(approvals, 3);
+    assert_eq!(failed_checks, 1);
+    assert_eq!(session.metrics.generative_calls, 5);
+    assert_eq!(session.metrics.simulated_turns, 0); // Calls used local HTTP, never a live label in docs.
+    assert_eq!(server.await.unwrap().len(), 5);
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("parser.py")).unwrap(),
+        patch
+    );
+    let (_, resumed) = Store::resume(home.path(), &session.id).unwrap();
+    assert_eq!(resumed.config.generation_provider, "claude");
+}

@@ -111,3 +111,10 @@ moved, merged, or deleted automatically. If both stores exist, use `--home` to
 select the older one. Old binaries are not removed by building the new executable.
 The v1 workspace-lock namespace also stays unchanged so running an old executable
 alongside S1Code cannot introduce a second writer to the same workspace.
+
+Native generation selection is explicit (`openai` or `claude`), recorded in each
+session and the evaluation report. Old v1 records default to OpenAI. The default
+interactive entry selects the labeled Codex bridge; native CLI `run` defaults remain
+OpenAI/rules. The task-entry UI is independent of the engine. See ADR 003 for Claude
+API versus official terminal-handoff ownership and the absence of inherited task
+context between new prompts.

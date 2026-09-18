@@ -4,6 +4,14 @@ From the source checkout, `cargo install --path . --locked` builds the pinned Ru
 release binary. Run `s1code doctor` to check storage, credential presence, and CLI
 compatibility. Doctor never prints keys.
 
+Run `s1code` for the interactive task-entry screen. `/login` connects the official
+Codex bridge to your ChatGPT account, `F2` changes provider, and `/help` shows setup.
+To use native Claude with Jev, first configure ANTHROPIC_API_KEY and the Jev key,
+then enter `/provider claude` and `/jev openrouter`. Submit a task as normal text.
+After a task, `q` closes its activity view and returns home. New prompts create
+independent saved tasks; `/resume ID` reopens an existing one. `/claude-code` hands
+the terminal to the official Claude Code application and does not use Jev.
+
 Start with `s1code demo --offline --workspace /tmp/s1code-demo-1`. The parser fixture
 starts broken. S1Code requests approval to run Python unittest, captures failures,
 reads the parser, proposes a hash-bound replacement, shows the unified diff, and

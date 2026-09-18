@@ -28,6 +28,26 @@ s1code doctor
 
 There is no published package or downloadable release advertised here.
 
+## Start the interactive app
+
+```sh
+s1code
+```
+
+This opens a task-entry screen, not a demo. Type a task and press Enter. The default
+is the explicitly labeled Codex bridge with managed ChatGPT login; `/login` starts
+its official login flow. `F2` cycles providers. `/provider claude` selects native
+Claude API generation, `/jev openrouter` enables Jev decisions in native mode,
+`/sessions` lists saved tasks, and `/help` explains setup. Keys are read from the
+environment, never from chat messages. Closing a task view returns to task entry;
+each new prompt starts an independent saved task rather than silently inheriting
+another task's permissions or context. Use `/resume ID` for existing work.
+
+`/claude-code` (or `s1code claude-code`) opens the installed, unmodified official
+Claude Code terminal. That application owns login, permissions, tools and history;
+S1Code and Jev do not control or record its internal actions. Exit it to return.
+This handoff is separate from native Claude generation.
+
 ## Try the actual tools offline
 
 ```sh
@@ -49,7 +69,7 @@ The context demo performs real reads, eviction, and exact rehydration with no mo
 
 ## Native provider setup
 
-Set `OPENAI_API_KEY` in your environment using your normal secret-management
+For OpenAI, set `OPENAI_API_KEY` in your environment using your normal secret-management
 workflow. No key is needed for offline tests. Do not put secrets in command history
 or project files. The default generation model is `gpt-4.1-2025-04-14`; use `--model`
 to select a Responses model supporting streaming structured output.
@@ -67,11 +87,24 @@ in the build environment because API keys were unavailable. See
 For an OpenRouter Jev key, use `OPENROUTER_API_KEY` and add
 `--decision jev --jev-provider openrouter`. This uses the dedicated Decisions API
 with a checked serving build, not chat completions. Native generation still needs
-its separate OpenAI API key. Managed ChatGPT login belongs to Codex bridge mode.
+its selected provider API key (OpenAI or Anthropic). Managed ChatGPT login belongs to Codex bridge mode.
 
 Every native process and patch requires exact approval. Native execution is **not
 an OS sandbox**: repository tests/build scripts execute code with your user's
 filesystem/network access. Use trusted repositories or your own sandbox.
+
+For native Claude, set `ANTHROPIC_API_KEY`, then:
+
+```sh
+s1code run "fix the failing parser test" --provider claude
+s1code run "fix the failing parser test" --provider claude \
+  --decision jev --jev-provider openrouter
+```
+
+The Claude adapter uses the public streaming Messages API with structured proposals.
+The default model is `claude-sonnet-5`; `--model` selects an explicit model. Local
+HTTP fixtures pass, including a real approved patch/test cycle. Billed Claude
+inference has not been verified. Claude subscription tokens are never imported.
 
 ## Headless and delegated modes
 
