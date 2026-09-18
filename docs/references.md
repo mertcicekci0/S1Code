@@ -67,3 +67,8 @@ provider inference or an authenticated Claude Code coding task.
 outputs documentation above. Error fields are `error.type`, `error.message`,
 `request_id`. HTTP 400 alone cannot distinguish request validation from configured
 spend limits. Only bounded, redacted selected fields are displayed; no raw headers.
+
+2026-09-19 official Jev route: rechecked https://docs.typesafe.ai/api for the direct
+POST /v1/systemone Bearer-auth endpoint. No implementation code reused. The supplied
+TypeSafe dashboard screenshot labels its masked apikey_ value as Secret key; prefix
+validation is now provider-specific and does not reject TypeSafe secrets as Anthropic IDs.

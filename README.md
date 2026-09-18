@@ -37,7 +37,7 @@ s1code
 This opens a task-entry screen, not a demo. Type a task and press Enter. The default
 is the explicitly labeled Codex bridge with managed ChatGPT login; `/login` starts
 its official login flow. `F2` cycles providers. `/provider claude` selects native
-Claude API generation, `/jev openrouter` enables Jev decisions in native mode,
+Claude API generation, `/jev typesafe` enables official Jev decisions in native mode,
 `/sessions` lists saved tasks, and `/help` explains setup. Keys are read from the
 environment, never from chat messages. Codex responses return to a message field on
 the same thread; Enter sends the next turn and Esc closes the conversation.

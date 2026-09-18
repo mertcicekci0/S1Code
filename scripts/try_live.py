@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Explicitly budgeted, hidden-input Claude/OpenRouter checks. Never stores keys."""
+"""Explicitly budgeted, hidden-input Claude/Jev checks. Never stores keys."""
 import argparse
 import getpass
 import json
@@ -21,14 +21,14 @@ def base_environment(source=None):
     return {name: source[name] for name in SAFE_ENV if name in source}
 
 
-def credential(label):
+def credential(label, provider):
     # Never let getpass fall back to echoed input when no usable terminal exists.
     with warnings.catch_warnings():
         warnings.simplefilter('error', getpass.GetPassWarning)
         value = getpass.getpass(label).strip()
-    if not value or any(c.isspace() for c in value):
+    if not value or any(c.isspace() for c in value) or '...' in value or '…' in value:
         raise ValueError('Empty/invalid key. No request was sent.')
-    if value.startswith('apikey_'):
+    if provider == 'claude' and value.startswith('apikey_'):
         raise ValueError('That is a key ID, not its secret. Copy the secret from the provider console.')
     return value
 
@@ -52,15 +52,21 @@ def check_environment(environment, name, secret):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=['check', 'task'], nargs='?', default='check')
+    parser.add_argument('mode', choices=['check', 'jev-check', 'task'], nargs='?', default='check')
+    parser.add_argument('--jev-provider', choices=['typesafe', 'openrouter'], default='typesafe',
+                        help='Jev credential issuer and endpoint (default: official TypeSafe)')
     args = parser.parse_args()
+    jev_name, jev_env, jev_test = {
+        'typesafe': ('TypeSafe / official Jev', 'TYPESAFE_API_KEY', 'jev_live_contract'),
+        'openrouter': ('OpenRouter Jev', 'OPENROUTER_API_KEY', 'openrouter_live_contract'),
+    }[args.jev_provider]
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         raise RuntimeError('Use your local interactive terminal; keys must not enter chat or a pipe.')
     environment = base_environment()
-    if args.mode == 'check':
+    if args.mode in ['check', 'jev-check']:
         executable = prepare_checks(environment)
-        budget = 2
-        print('LIVE CHECK: at most one Claude request and one OpenRouter Jev request. No tool actions execute.')
+        budget = 1 if args.mode == 'jev-check' else 2
+        print(f'LIVE CHECK: at most one {jev_name} request' + (' and one Claude request.' if budget == 2 else '.') + ' No tool actions execute.')
     else:
         subprocess.run(['cargo', 'build', '--locked', '--release'], cwd=ROOT, env=environment, check=True)
         executable = str(ROOT / 'target' / 'release' / 's1code')
@@ -71,23 +77,26 @@ def main():
     if input(f'Type RUN {budget} to authorize this paid run, or press Enter to stop: ').strip() != f'RUN {budget}':
         print('Stopped. No credentials collected and no provider requests sent.')
         return 0
-    anthropic = credential('Anthropic secret (hidden, not the apikey_ ID): ')
-    if not anthropic.startswith('sk-ant-api'):
-        raise ValueError('Expected a Claude Console API secret starting sk-ant-api; no request sent.')
-    router = credential('OpenRouter secret (hidden): ')
-    if router.startswith('sk-ant-'):
-        raise ValueError('Anthropic keys cannot authenticate OpenRouter; no request sent.')
-    if args.mode == 'check':
-        for name, secret, test in [
-            ('ANTHROPIC_API_KEY', anthropic, 'claude_live_contract'),
-            ('OPENROUTER_API_KEY', router, 'openrouter_live_contract'),
-        ]:
+    anthropic = None
+    if args.mode != 'jev-check':
+        anthropic = credential('Anthropic secret (hidden, not the apikey_ ID): ', 'claude')
+        if not anthropic.startswith('sk-ant-api'):
+            raise ValueError('Expected a Claude Console API secret starting sk-ant-api; no request sent.')
+    jev_secret = credential(f'{jev_name} secret (hidden, full unmasked key): ', args.jev_provider)
+    if jev_secret.startswith('sk-ant-'):
+        raise ValueError('Anthropic keys cannot authenticate Jev; no request sent.')
+    if args.jev_provider == 'typesafe' and jev_secret.startswith('sk-or-'):
+        raise ValueError('Use the TypeSafe secret, or explicitly choose --jev-provider openrouter.')
+    if args.mode in ['check', 'jev-check']:
+        checks = [] if anthropic is None else [('ANTHROPIC_API_KEY', anthropic, 'claude_live_contract')]
+        checks.append((jev_env, jev_secret, jev_test))
+        for name, secret, test in checks:
             result = subprocess.run([executable, test, '--exact', '--ignored', '--test-threads=1'],
                                     cwd=ROOT, env=check_environment(environment, name, secret))
             if result.returncode:
                 print('Live check failed. Stopped; no automatic retry or other-provider fallback.')
                 return result.returncode
-        print('Both live contracts passed. This does not establish coding success or efficiency. Keep Jev results private.')
+        print('Requested live contracts passed. This does not establish coding success or efficiency. Keep Jev results private.')
         return 0
     # Retain a private task/session for inspection and resume; never save the credentials.
     directory = pathlib.Path(tempfile.mkdtemp(prefix='s1code-live-'))
@@ -98,12 +107,12 @@ def main():
     subprocess.run(['git', 'init', '-q', str(workspace)], env=environment, check=True)
     print(f'Private live workspace/session: {directory}')
     print('Keys are not saved. Keep traces private; close the task view with q after it stops.')
-    run_env = dict(environment, ANTHROPIC_API_KEY=anthropic, OPENROUTER_API_KEY=router)
+    run_env = dict(environment, ANTHROPIC_API_KEY=anthropic, **{jev_env: jev_secret})
     return subprocess.run([
         executable, '--home', str(directory / 'data'), 'run',
         'Fix parse_count for whole signed integers, blanks and invalid text; run tests.',
         '--workspace', str(workspace), '--provider', 'claude', '--decision', 'jev',
-        '--jev-provider', 'openrouter', '--max-provider-requests', '8', '--max-generations', '6',
+        '--jev-provider', args.jev_provider, '--max-provider-requests', '8', '--max-generations', '6',
     ], env=run_env).returncode
 
 

@@ -208,7 +208,7 @@ implemented; this release's native Claude adapter uses ANTHROPIC_API_KEY.
 ## Local hidden-key live launcher
 
 From the source directory, run `python3 scripts/try_live.py check` for at most one
-Claude request and one OpenRouter Jev request, or `python3 scripts/try_live.py task`
+Claude request and one official TypeSafe Jev request, or `python3 scripts/try_live.py task`
 for a fresh parser task capped at eight total provider requests including retries.
 The launcher builds before asking for keys, asks for explicit request-budget consent,
 then reads keys without echo in your local terminal. It does not save them or send
@@ -216,3 +216,11 @@ them to Cargo/build scripts. A request cap is not a dollar cap. Set provider cre
 limits separately. Task sessions remain in the printed private temporary directory;
 keep Jev measurements private. These commands were prepared and tested offline;
 live provider validation remains unverified until you run them successfully.
+
+The launcher now defaults to direct TypeSafe access (`TYPESAFE_API_KEY`). Use
+`python3 scripts/try_live.py jev-check` to test only Jev with one authorized request,
+without a Claude key or request. Paste the full secret, not the dashboard's masked
+preview. TypeSafe secrets may start with `apikey_`; the launcher does not confuse
+them with Anthropic key IDs. To explicitly select the gateway instead, append
+`--jev-provider openrouter` and enter its separate credential. Existing sessions
+retain their original provider; the route is never silently changed on resume.

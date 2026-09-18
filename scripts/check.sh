@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+python3 scripts/test_try_live.py
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked

@@ -185,3 +185,18 @@ No new live request was made by the agent.
 Validation: 40 offline tests, fmt/clippy, release build and the 228-package license
 inventory passed after this fix. Live root cause still requires a new provider
 response; the previous response body cannot be recovered from the screenshot.
+
+## Official Jev route — 2026-09-19
+
+The local live launcher and new home settings now default to direct TypeSafe Jev,
+matching CLI defaults. Existing sessions retain their recorded route. Added
+`python3 scripts/try_live.py jev-check` for one explicit, isolated Jev request without
+Claude; `check` and `task` now pair Claude with TypeSafe by default. OpenRouter remains
+an explicit `--jev-provider openrouter` choice. Key validation is provider-specific:
+TypeSafe `apikey_` secrets are accepted; masked dashboard previews are rejected.
+Four offline launcher regressions verify provider routing, isolated child credentials,
+key formats and stopping before credential collection without budget consent.
+No live TypeSafe request was executed here; user key is not installed or persisted.
+Validation for the route change: four Python launcher tests and six Rust library
+tests passed; formatting, all-target clippy and release build passed. The existing
+full 40-test Rust suite last passed in the immediately preceding diagnostics change.

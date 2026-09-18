@@ -35,7 +35,7 @@ impl Default for Settings {
             provider: "codex".into(),
             model: None,
             decision: "rules".into(),
-            jev_provider: "openrouter".into(),
+            jev_provider: "typesafe".into(),
             workspace: std::env::current_dir().unwrap_or_else(|_| ".".into()),
         }
     }
