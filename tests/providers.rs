@@ -211,6 +211,18 @@ async fn openrouter_decisions_use_own_contract_and_pin_resolved_build() {
         .await
         .unwrap();
     assert_eq!(metrics.cache_hits, 1);
+    assert!(metrics.decision_request_bytes > metrics.decision_state_bytes);
+    assert!(metrics.decision_state_bytes.unwrap() > 0);
+    let cancelled = CancellationToken::new();
+    cancelled.cancel();
+    let r = request();
+    assert!(
+        adapter
+            .ask(r.state, r.questions, &cancelled, &mut metrics)
+            .await
+            .is_err()
+    );
+    assert_eq!(metrics.cache_hits, 1);
     let requests = server.await.unwrap();
     assert!(requests[0].starts_with("POST /api/alpha/decisions "));
     let sent: serde_json::Value =

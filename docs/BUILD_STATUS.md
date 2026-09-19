@@ -1,4 +1,4 @@
-# Build status — 0.3.0-rc.1
+# Build status — 0.3.0-rc.2
 
 Experimental source release candidate, prepared 2026-09-19. Native coding and
 recoverable context are implemented. This is not a stable general-purpose release,
@@ -44,7 +44,7 @@ and no cost, speed or task-quality superiority claim is established.
 
 ## Verification recorded locally
 
-- 65 offline Rust tests and 12 Python launcher/comparison tests passed. Coverage includes
+- 74 offline Rust tests and 12 Python launcher/comparison tests passed. Coverage includes
   fragmented streams, invalid decisions, retries, stale candidates, policy bypass,
   traversal/symlinks, concurrent edits, patch recovery, pinned overflow, exact
   rehydration, dependency closure, cancellation, restart, duplicate bridge requests,
@@ -74,15 +74,15 @@ and no cost, speed or task-quality superiority claim is established.
 - Live task-success/cost/latency comparisons across rules, Jev and constrained
   generation have not established an advantage. Eviction quality, cache reuse and
   invalidation costs require repeated matched trials; keep Jev results private.
-- Linux is a target with CI configuration; local verification was on macOS ARM64.
-  Hosted CI results must be checked on GitHub after pushing. Windows is unsupported.
+- Linux and macOS hosted CI passed for commit 279d230; newer changes require their
+  own hosted checks after pushing. Local verification is on macOS ARM64. Windows is unsupported.
 - Native commands execute trusted repository code without an OS filesystem/network
   sandbox. Read allowlists and worktrees do not provide OS isolation. Native path
   exclusions cannot control upstream Codex internals.
-- Native tasks are bounded runs, not a full multi-turn coding chat. Only Python
+- Native conversations support bounded follow-ups with cumulative metrics. Only Python
   unittest, exact node --test and offline Cargo test/check execute. No package installation, general
   shell, deletion/rename/binary patch, swarms, daemon or local learned model.
-- Patches require existing parent directories. Multi-file updates are recoverable,
+- Approved patches can create allowed parent directories. Multi-file updates are recoverable,
   not atomic as a set. Rehydration restores captured bytes, which may be historical
   or originally truncated; it does not guarantee the model requests useful evidence.
 - Retention batches still repeat the task/rubric. Large pinned context fails
@@ -169,7 +169,7 @@ metadata, so eviction cannot accidentally retain a second copy of code in action
 arguments. Canonical actions and exact artifact bytes remain recoverable. A
 regression covers this boundary. The default generation sub-budget is 24 while the
 combined provider request cap remains 24; this avoids premature generation-only
-stops without increasing the total request cap. All 65 Rust and 12 Python checks,
+stops without increasing the total request cap. All 74 Rust and 12 Python checks,
 formatting, clippy, release build and publication scan passed locally. Private live
 acceptance was performed; provider-restricted records are not included in Git.
 
@@ -178,3 +178,20 @@ waiting for every inherited descriptor to close. A duplicate-descriptor regressi
 covers immediate resume and continued exclusion while the resumed store is active.
 This addresses an intermittent Linux CI failure during concurrent process spawning.
 CI now checks out full history for the publication scanner.
+
+## Demo hardening
+
+- Native follow-up input in the task view; exact prior user requests remain pinned,
+  verification and prior proposals reset, all usage remains cumulative. Headless
+  `resume --message` keeps existing caps unless explicitly changed.
+- Focused Jev relevance snapshots, actual serialized request/state byte counters,
+  adaptive retention batches, feasibility checks before paid classification, and
+  early stop once enough evidence can be evicted. Bytes are not token or cost estimates.
+- Small independent outputs avoid retention requests; call/dependency groups stay
+  together. Patch dependencies use matching file evidence, not arbitrary nearby tools.
+- Nested file creation with a backward-compatible recovery journal; conflicting
+  file/parent paths, symlinks and ignored targets fail before mutation. Recovery
+  preserves user files in created directories. Policy version 3 invalidates old approvals.
+- `/eviction` exposes retention policy in the home screen and saved preferences.
+- New behavior has offline regression coverage; no new paid comparative evaluation
+  was performed. The earlier private live coding acceptance remains a separate check.

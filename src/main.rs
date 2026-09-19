@@ -79,6 +79,9 @@ enum Commands {
     Run(RunArgs),
     Resume {
         id: String,
+        /// New native follow-up; retains prior evidence and cumulative request caps.
+        #[arg(long, conflicts_with = "continue_task", conflicts_with = "approve")]
+        message: Option<String>,
         #[arg(long)]
         approve: Option<String>,
         #[arg(long)]
@@ -92,6 +95,9 @@ enum Commands {
         max_provider_requests: Option<u64>,
         #[arg(long)]
         max_generations: Option<u64>,
+        /// Explicit total step cap, including completed steps.
+        #[arg(long)]
+        max_steps: Option<usize>,
     },
     Sessions,
     Eval {
@@ -212,6 +218,7 @@ async fn execute(cmd: Commands, home: PathBuf) -> Result<()> {
                 "experimental decision thresholds must be finite values in 0..1"
             );
             let config = RunConfig {
+                interactive_followups: false,
                 auto_approve: a.auto_approve,
                 max_output_tokens: a.max_output_tokens,
                 generation_effort: a.effort,
@@ -285,14 +292,28 @@ async fn execute(cmd: Commands, home: PathBuf) -> Result<()> {
         }
         Commands::Resume {
             id,
+            message,
             approve,
             headless,
             acknowledge_interruption,
             continue_task,
             max_provider_requests,
             max_generations,
+            max_steps,
         } => {
             let (store, mut s) = Store::resume(&home, &id)?;
+            if let Some(cap) = max_steps {
+                ensure!(
+                    s.config.mode == Mode::Native && cap >= s.steps && cap > 0,
+                    "native step cap must cover completed steps"
+                );
+                s.config.max_steps = cap;
+                store.record(
+                    &mut s,
+                    "step_budget_authorized",
+                    serde_json::json!({"max_steps":cap,"counters_reset":false}),
+                )?;
+            }
             if max_provider_requests.is_some() || max_generations.is_some() {
                 ensure!(
                     s.config.mode == Mode::Native,
@@ -334,8 +355,15 @@ async fn execute(cmd: Commands, home: PathBuf) -> Result<()> {
                 )?;
             }
             if s.config.mode == Mode::Codex {
+                ensure!(
+                    message.is_none(),
+                    "--message is native-only; use --continue-task for Codex"
+                );
                 drive_bridge(store, s, headless, continue_task).await?;
                 return Ok(());
+            }
+            if let Some(message) = message {
+                store.follow_up(&mut s, &message)?;
             }
             let generator: Arc<dyn Generator> = if s.config.offline_demo {
                 Arc::new(demo::OfflineDemo {
@@ -515,7 +543,11 @@ fn home_run(task: String, settings: &s1code::home::Settings) -> RunArgs {
         jev_retention_threshold: 0.5,
         jev_request_limit: 64_000,
         jev_state_limit: 32_000,
-        eviction: "conservative".into(),
+        eviction: if delegated {
+            "conservative".into()
+        } else {
+            settings.eviction.clone()
+        },
     }
 }
 
@@ -541,12 +573,14 @@ async fn interactive_home(home: PathBuf) -> Result<()> {
             }
             Command::Resume(id, continue_task) => Commands::Resume {
                 id,
+                message: None,
                 continue_task,
                 approve: None,
                 headless: false,
                 acknowledge_interruption: false,
                 max_provider_requests: None,
                 max_generations: None,
+                max_steps: None,
             },
             Command::Login => Commands::Login {
                 provider: "codex".into(),
@@ -635,7 +669,7 @@ fn session_rows(home: &std::path::Path) -> Vec<String> {
 
 async fn drive(
     store: Store,
-    s: Session,
+    mut s: Session,
     generator: Arc<dyn Generator>,
     headless: bool,
     approved: Option<String>,
@@ -649,6 +683,7 @@ async fn drive(
         signal.cancel();
     });
     let interactive = !headless && io::stdin().is_terminal() && io::stdout().is_terminal();
+    s.config.interactive_followups = interactive && !s.config.offline_demo;
     let mut label = if s.config.offline_demo {
         "OFFLINE SIMULATION · real tools · no model calls".into()
     } else {

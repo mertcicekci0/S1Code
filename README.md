@@ -1,7 +1,7 @@
 # S1Code
 
 A Rust terminal coding agent with concrete candidate actions, deterministic policy,
-and recoverable context. **Experimental 0.3.0-rc.1, built from source.** S1Code is a working
+and recoverable context. **Experimental 0.3.0-rc.2, built from source.** S1Code is a working
 name; naming availability and trademark clearance have not been established.
 
 Native mode owns the coding loop. A generation provider proposes plans and complete
@@ -46,8 +46,10 @@ environment, never from chat messages. Codex responses return to a message field
 the same thread; Enter sends the next turn and Esc closes the conversation.
 F2 inside a task opens the activity/decision/context/diff inspector. Protocol events
 are hidden from the default conversation. Closing returns home; a new home prompt
-starts an independent saved task. Native tasks remain bounded runs; use `/resume ID`
-for existing work.
+starts an independent saved task. Native tasks also accept follow-ups in the same conversation, retaining exact prior
+requests and captured evidence. Each submitted follow-up has a visible bounded
+request allowance; session usage stays cumulative. Use `/resume ID` for existing work.
+`/eviction jev` enables Jev-assisted reversible eviction independently of action selection.
 
 `/claude-code` (or `s1code claude-code`) opens the installed, unmodified official
 Claude Code terminal. That application owns login, permissions, tools and history;

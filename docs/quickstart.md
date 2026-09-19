@@ -16,8 +16,11 @@ Use `/model claude-opus-5` to select your model. Optional `/permissions full-acc
 preauthorizes supported native actions; `/permissions manual` restores prompts.
 Changing provider resets this choice. Paste your task directly into the input and
 press Enter; no shell clipboard command is needed.
-After a task, `q` closes its activity view and returns home. New prompts create
-independent saved tasks; `/resume ID` reopens an existing one. `/claude-code` hands
+After a native task, type a follow-up in the same screen. Prior requests and evidence
+remain available, while the next task needs fresh verification. Sending a follow-up
+authorizes the displayed additional request allowance (at most 24) and a bounded
+step allowance; counters remain cumulative. Esc or `/exit` returns home. New home
+prompts create independent saved tasks; `/resume ID` reopens an existing one. `/claude-code` hands
 the terminal to the official Claude Code application and does not use Jev.
 
 Start with `s1code demo --offline --workspace /tmp/s1code-demo-1`. The parser fixture
@@ -57,11 +60,11 @@ Recovery refuses to overwrite subsequent user edits.
 The default task screen shows conversation, not protocol events. `F2` toggles the
 inspector. In a Codex conversation, type a follow-up and press Enter after a response;
 Esc closes it without submitting another turn. Interactive resume waits for input.
-Native runs finish after their bounded task.
+Native conversations also accept follow-ups; a headless run ends after one task.
 
 Inspector keys: `1` activity, `2` candidates/selection, `3` context, `4` diff;
 `↑`/`↓` select events, `Enter` expand/collapse, `PgUp`/`PgDn` scroll,
-`y`/`n` approve/deny, `Esc` or `Ctrl-C` cancel. After a run stops, press `q` to close
+`y`/`n` approve/deny, `Esc` or `Ctrl-C` cancel. After an offline run stops, press `q` to close
 and leave a copyable summary in the normal terminal.
 
 Approvals show the command or changed files in a dedicated card. Activity and
@@ -77,3 +80,19 @@ screen; reopen `s1code` in any project to reuse them. Workspace always starts at
 current directory and automatic approval is not saved as a global preference.
 Use Shift-Enter for a newline or paste a multiline task. `/output-limit 16384` and
 `/effort medium` configure native generation; Opus/Sonnet 5 already default to medium.
+
+Use `/eviction jev` for model-assisted retention or `/eviction conservative` for the
+deterministic policy. This preference is saved separately from `/decision`. Jev
+retention runs only under actual generation-context pressure, within both request
+limits and the combined request cap. It does not run for every tool action.
+
+Headless follow-up keeps cumulative caps unless you explicitly raise them:
+
+```sh
+s1code resume SESSION_ID --message "Add keyboard shortcuts and verify them" \
+  --headless --max-provider-requests 48 --max-generations 48 --max-steps 80
+```
+
+Unknown interrupted effects require recovery first. Existing approvals and old
+proposals do not carry over to the follow-up. Approved new files can create allowed
+parent directories; rollback removes only recorded empty directories.

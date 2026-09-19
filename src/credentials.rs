@@ -37,6 +37,9 @@ pub fn present(variable: &str) -> bool {
     if std::env::var(variable).is_ok_and(|v| !v.trim().is_empty()) {
         return true;
     }
+    if std::env::var("S1CODE_KEYCHAIN").as_deref() == Ok("off") {
+        return false;
+    }
     static PRESENCE: std::sync::OnceLock<Mutex<std::collections::BTreeMap<String, bool>>> =
         std::sync::OnceLock::new();
     let mut presence = PRESENCE
@@ -59,6 +62,9 @@ fn stored(variable: &str) -> Result<String> {
 }
 
 fn lookup(variable: &str, secret: bool) -> Result<Vec<u8>> {
+    if std::env::var("S1CODE_KEYCHAIN").as_deref() == Ok("off") {
+        bail!("Saved credential lookup disabled; set {variable} explicitly");
+    }
     let account = account(variable).context(
         "No saved credential support for this provider; set its API key environment variable",
     )?;

@@ -135,8 +135,19 @@ pub fn summary_text(v: &Value) -> String {
             m["tool_calls"], m["generative_calls"], m["decision_requests"], m["rehydrations"]
         )
     };
+    let budget = if v["status"] == "budget_exhausted" && v["limits"].is_object() {
+        format!(
+            "\nBudget: {} / {} steps; generation cap {}; combined request cap {}. Resume with explicit higher caps, or narrow the task.",
+            v["limits"]["steps"],
+            v["limits"]["max_steps"],
+            v["limits"]["max_generations"],
+            v["limits"]["max_provider_requests"]
+        )
+    } else {
+        String::new()
+    };
     format!(
-        "{simulation}{status}\n\n{check}\n{counts}\n\nChecks passing is evidence, not proof of full correctness."
+        "{simulation}{status}\n\n{check}\nSession totals · {counts}{budget}\n\nChecks passing is evidence, not proof of full correctness."
     )
 }
 fn selection_text(v: &Value) -> String {
@@ -402,7 +413,11 @@ impl Screen {
             "input_ready" => {
                 self.awaiting_input = true;
                 self.status = "Your turn".into();
+                if v["native"] == true {
+                    self.message("Next", string(v, "message"));
+                }
             }
+            "input_rejected" => self.message("Input", string(v, "message")),
             "conversation_history" => {
                 if let Some(messages) = v["messages"].as_array() {
                     for m in messages {
@@ -520,6 +535,13 @@ impl Screen {
         text
     }
     fn draw(&mut self, f: &mut Frame, label: &str) {
+        let input_width = f.area().width.saturating_sub(2).max(1) as usize;
+        let (input_lines, cursor_row, cursor_col) = self.editor.layout(input_width);
+        let footer_height = if self.awaiting_input && !self.inspect {
+            (input_lines.len() + 2).clamp(3, 8) as u16
+        } else {
+            3
+        };
         let pending_h = if self.pending.is_some() { 5 } else { 0 };
         let header_height = (1 + Line::raw(label)
             .width()
@@ -530,7 +552,7 @@ impl Screen {
             Constraint::Length(if self.inspect { 2 } else { 0 }),
             Constraint::Length(pending_h),
             Constraint::Min(1),
-            Constraint::Length(3),
+            Constraint::Length(footer_height),
         ])
         .split(f.area());
         let header = Text::from(vec![
@@ -740,14 +762,30 @@ impl Screen {
                 body,
             );
         }
-        let input_text;
-        let footer = if self.awaiting_input {
-            input_text = format!(
-                "> {}▏\nEnter Send · Esc Close · F2 Inspect",
-                self.editor.text.iter().collect::<String>()
+        if self.awaiting_input && !self.inspect {
+            let input_rows =
+                Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(rows[4]);
+            let scroll = cursor_row.saturating_sub(input_rows[0].height.saturating_sub(2) as usize);
+            f.render_widget(
+                Paragraph::new(input_lines.join("\n"))
+                    .scroll((scroll.min(u16::MAX as usize) as u16, 0))
+                    .block(Block::default().borders(Borders::TOP).title(" Follow-up ")),
+                input_rows[0],
             );
-            &input_text
-        } else if self.done {
+            f.render_widget(
+                Paragraph::new("Enter Send · Shift-Enter New line · Esc Close · F2 Inspect")
+                    .style(Style::default().fg(MUTED)),
+                input_rows[1],
+            );
+            if input_rows[0].height >= 2 {
+                f.set_cursor_position((
+                    input_rows[0].x + cursor_col.min(input_width - 1) as u16,
+                    input_rows[0].y + 1 + cursor_row.saturating_sub(scroll) as u16,
+                ));
+            }
+            return;
+        }
+        let footer = if self.done {
             "q Close · F2 Inspect · 1–4 Views\nPgUp/PgDn Scroll · text remains copyable"
         } else {
             "F2 Inspect · 1–4 Views · Enter Details\nPgUp/PgDn Scroll · Esc / Ctrl-C Cancel"
@@ -789,6 +827,8 @@ pub async fn terminal(
                 if key.code == KeyCode::F(2) { screen.inspect = !screen.inspect; screen.tab=0; screen.raw=false; continue; }
                 if screen.awaiting_input && !screen.inspect {
                     match key.code {
+                        KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => screen.editor.insert("\n"),
+                        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => { screen.editor.take(); },
                         KeyCode::Esc => { let _=input.send(UiInput::Close); screen.awaiting_input=false; screen.closing=true; }
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => { let _=input.send(UiInput::Close); screen.awaiting_input=false; screen.closing=true; }
                         KeyCode::Enter => { let text=screen.editor.take(); if !text.trim().is_empty() { if text.trim()=="/exit" { let _=input.send(UiInput::Close); screen.closing=true; } else { let _=input.send(UiInput::Message(text)); } screen.awaiting_input=false; } }
@@ -842,6 +882,35 @@ mod tests {
             .map(|row| row.iter().map(|c| c.symbol()).collect::<String>())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+    #[test]
+    fn native_followup_input_wraps_and_preserves_multiline_text() {
+        let mut screen = Screen::default();
+        screen.receive(event(
+            "summary",
+            json!({"status":"completed","metrics":{},"verification":null}),
+        ));
+        screen.receive(event(
+            "input_ready",
+            json!({"native":true,"message":"At most 24 additional requests"}),
+        ));
+        let text = format!(
+            "Add mobile controls\n{}\nKeep tests passing",
+            "Unicode sınırları ".repeat(30)
+        );
+        screen.editor.insert(&text);
+        for width in [24, 50, 110] {
+            let view = render(&mut screen, width);
+            assert!(view.contains("Follow-up"));
+            assert!(view.contains("Keep tests passing"));
+            assert_eq!(screen.editor.text.iter().collect::<String>(), text);
+        }
+        screen.receive(event(
+            "input_rejected",
+            json!({"message":"Use a shorter message"}),
+        ));
+        screen.receive(event("input_ready", json!({})));
+        assert!(screen.awaiting_input);
     }
     #[test]
     fn long_task_is_folded_but_inspectable_and_recovery_removes_partial_stream() {

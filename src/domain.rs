@@ -114,6 +114,11 @@ pub struct Metrics {
     pub generative_calls: u64,
     pub decision_requests: u64,
     pub decision_questions: u64,
+    /// Serialized request/state bytes sent, including retries; not token counts.
+    #[serde(default)]
+    pub decision_request_bytes: Option<u64>,
+    #[serde(default)]
+    pub decision_state_bytes: Option<u64>,
     pub tool_calls: u64,
     pub delegations: u64,
     pub retries: u64,
@@ -155,6 +160,8 @@ pub struct Verification {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RunConfig {
+    #[serde(default)]
+    pub interactive_followups: bool,
     /// Explicit user consent for supported native writes/processes; never overrides deny.
     #[serde(default)]
     pub auto_approve: bool,
@@ -191,6 +198,7 @@ pub struct RunConfig {
 impl Default for RunConfig {
     fn default() -> Self {
         Self {
+            interactive_followups: false,
             auto_approve: false,
             mode: Mode::Native,
             decision: "rules".into(),
@@ -236,6 +244,9 @@ pub struct Session {
     pub id: String,
     pub workspace: String,
     pub task: String,
+    /// Exact prior user requests remain trusted, pinned context across turns.
+    #[serde(default)]
+    pub prior_user_requests: Vec<String>,
     pub config: RunConfig,
     pub status: RunStatus,
     pub context: Vec<ContextItem>,

@@ -20,7 +20,7 @@ fn content_blocks(input: Value) -> Vec<Value> {
     };
     let mut blocks = vec![];
     let mut stable = serde_json::Map::new();
-    for key in ["task", "constraints"] {
+    for key in ["prior_user_requests", "task", "constraints"] {
         if let Some(value) = fields.remove(key) {
             stable.insert(key.into(), value);
         }

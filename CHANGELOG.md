@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased — Native usability and recovery
+## 0.3.0-rc.2 — Native conversations and bounded decisions
+
+- Native conversations accept follow-ups, retaining exact prior requests and
+  evidence with cumulative usage and fresh verification.
+- Jev selection uses focused excerpts; retention batches fit both limits, skip
+  infeasible or uneconomic work, and stop once the working set fits its target.
+- New files can create approved parent directories with recovery; policy version 3.
+- `/eviction` independently configures and remembers context retention policy.
 
 - Claude uses streamed client-tool proposals with explicit output and effort budgets.
   A single concrete next action avoids unnecessary alternative implementations.

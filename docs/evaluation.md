@@ -105,3 +105,11 @@ The 0.3.0-rc.1 Claude request layout and prompt contract are versioned with sour
 Cache writes and reads remain separate usage fields and must both be included in
 any cost analysis. Compare policies at the same source commit and model; do not
 attribute simultaneous caching and eviction changes solely to Jev.
+
+For 0.3.0-rc.2, Jev relevance selection uses focused partial excerpts and candidate
+IDs, while the constrained generative baseline receives full candidate arguments
+so it can return an exact action. This is a decision-policy/harness comparison, not
+an isolated comparison of model weights on identical prompts. Record the source
+revision and prompt/serialization contract with every trial. Decision byte counters
+include retries, exclude exact cache hits, and are not token or price estimates;
+historical sessions without complete accounting report unknown byte totals.

@@ -201,6 +201,62 @@ pub fn check_budget(r: &DecisionRequest, total: usize, state_longest: usize) -> 
     Ok(())
 }
 
+pub fn configured_limits(config: &crate::domain::RunConfig) -> (usize, usize) {
+    let cap = if config.jev_provider == "openrouter" {
+        32_000
+    } else {
+        usize::MAX
+    };
+    (
+        config.jev_request_limit.min(cap),
+        config.jev_state_limit.min(cap),
+    )
+}
+
+/// Reduce only explicitly partial decision excerpts. Never trim user requests,
+/// candidate identities, policy/preconditions, or canonical evidence.
+pub fn fit_selection_request(
+    mut request: DecisionRequest,
+    total: usize,
+    state_limit: usize,
+) -> Result<DecisionRequest> {
+    let original_count = request.state["eligible"].as_array().map_or(0, Vec::len);
+    loop {
+        let error = match check_budget(&request, total, state_limit) {
+            Ok(()) => return Ok(request),
+            Err(error) => error,
+        };
+        if let Some(items) = request.state["eligible"].as_array_mut()
+            && !items.is_empty()
+        {
+            items.pop();
+            let count = items.len();
+            request.state["evidence_scope"]["shown"] = count.into();
+            request.state["evidence_scope"]["omitted_for_budget"] = (original_count - count).into();
+            continue;
+        }
+        let mut changed = false;
+        if let Some(candidates) = request.state["candidates"].as_array_mut() {
+            for candidate in candidates {
+                if let Some(files) = candidate["action"]["files"].as_array_mut() {
+                    for file in files {
+                        if file
+                            .as_object_mut()
+                            .is_some_and(|f| f.remove("proposed_excerpt").is_some())
+                        {
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+        if !changed {
+            return Err(error);
+        }
+        request.state["candidate_excerpts_omitted_for_budget"] = true.into();
+    }
+}
+
 pub fn retryable(status: u16) -> bool {
     matches!(status, 429 | 500 | 502 | 503 | 504 | 529)
 }
@@ -335,6 +391,7 @@ impl Jev {
         cancel: &CancellationToken,
         metrics: &mut Metrics,
     ) -> Result<DecisionResponse> {
+        ensure!(!cancel.is_cancelled(), "decision cancelled");
         let request = DecisionRequest {
             model: self.model.clone(),
             state,
@@ -371,8 +428,18 @@ impl Jev {
                 "provider request budget exhausted"
             );
             ensure!(!cancel.is_cancelled(), "decision cancelled");
+            if metrics.decision_requests == 0 {
+                metrics.decision_request_bytes = Some(0);
+                metrics.decision_state_bytes = Some(0);
+            }
             metrics.decision_requests += 1;
             metrics.decision_questions += request.questions.len() as u64;
+            if let Some(bytes) = &mut metrics.decision_request_bytes {
+                *bytes += serde_json::to_vec(&wire)?.len() as u64;
+            }
+            if let Some(bytes) = &mut metrics.decision_state_bytes {
+                *bytes += serde_json::to_vec(&request.state)?.len() as u64;
+            }
             if attempt > 0 {
                 metrics.retries += 1;
             }

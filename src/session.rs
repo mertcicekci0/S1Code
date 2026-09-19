@@ -97,6 +97,7 @@ impl Store {
             id,
             workspace: workspace.to_string_lossy().into(),
             task: store.redactor.text(&task),
+            prior_user_requests: vec![],
             config,
             status: RunStatus::Running,
             context: vec![],
@@ -115,6 +116,42 @@ impl Store {
         };
         store.save(&s)?;
         Ok((store, s))
+    }
+    pub fn follow_up(&self, s: &mut Session, message: &str) -> Result<()> {
+        ensure!(
+            s.config.mode == Mode::Native,
+            "native follow-up requires a native session"
+        );
+        ensure!(
+            !s.recovery_needed
+                && s.inflight.is_none()
+                && !self.dir.join("patch-recovery.json").exists(),
+            "Recover interrupted execution before submitting a follow-up; no actions were replayed"
+        );
+        ensure!(
+            !message.trim().is_empty() && message.chars().count() <= 8192,
+            "follow-up must contain 1..8192 characters"
+        );
+        ensure!(
+            !self.redactor.contains_secret(message),
+            "follow-up contains sensitive content; enter credentials outside the conversation"
+        );
+        s.prior_user_requests
+            .push(std::mem::replace(&mut s.task, message.trim().into()));
+        if s.status == RunStatus::Completed {
+            for c in &mut s.context {
+                if matches!(c.action, Action::Patch { .. }) {
+                    c.pinned = false;
+                }
+            }
+        }
+        s.pending = None;
+        s.proposals.clear();
+        s.seen.clear();
+        s.verified = None;
+        s.status = RunStatus::Running;
+        self.record(s, "user_followup", serde_json::json!({"message":message.trim(),"old_proposals_discarded":true,"metrics_reset":false}))?;
+        Ok(())
     }
     fn open(home: &Path, id: &str, workspace: &Path) -> Result<Self> {
         uuid::Uuid::parse_str(id).context("invalid session id")?;

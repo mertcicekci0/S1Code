@@ -510,3 +510,159 @@ fn exact_replacement_materializes_a_reviewable_patch_and_rejects_ambiguity() {
     };
     assert_eq!(policy::classify(&unmaterialized), PolicyClass::Deny);
 }
+
+#[tokio::test]
+async fn native_followup_keeps_evidence_and_reverifies_with_cumulative_metrics() {
+    use s1code::generation::{GenerationResult, Generator};
+    use serde_json::{Value, json};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Turns(AtomicUsize);
+    #[async_trait::async_trait]
+    impl Generator for Turns {
+        fn simulated(&self) -> bool {
+            true
+        }
+        async fn generate(
+            &self,
+            input: Value,
+            _: &CancellationToken,
+            _: mpsc::UnboundedSender<String>,
+        ) -> anyhow::Result<GenerationResult> {
+            let n = self.0.fetch_add(1, Ordering::SeqCst);
+            if n >= 3 {
+                assert_eq!(input["task"], "two");
+                assert_eq!(input["prior_user_requests"], json!(["one"]));
+                if n == 3 {
+                    assert!(input["verification"].is_null());
+                }
+            }
+            let action = match n {
+                0 => Action::Patch {
+                    edits: vec![Edit {
+                        path: "counter.py".into(),
+                        before_hash: None,
+                        content: "value = 1\n".into(),
+                    }],
+                },
+                1 | 5 => Action::Run {
+                    argv: vec!["python3".into(), "-m".into(), "unittest".into()],
+                    verification: true,
+                },
+                2 | 6 => Action::Finish {
+                    summary: "Checks passed".into(),
+                },
+                3 => Action::Read {
+                    path: "counter.py".into(),
+                    start: 1,
+                    lines: 20,
+                },
+                4 => Action::Replace {
+                    path: "counter.py".into(),
+                    before_hash: hash(b"value = 1\n"),
+                    old: "value = 1".into(),
+                    new: "value = 2".into(),
+                },
+                _ => panic!("unexpected extra generation"),
+            };
+            Ok(GenerationResult {
+                proposal: Proposal {
+                    message: "Offline two-turn fixture".into(),
+                    actions: vec![action],
+                },
+                usage: Usage::default(),
+                model: "offline-fixture".into(),
+            })
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("test_counter.py"), "import unittest\nfrom counter import value\nclass Test(unittest.TestCase):\n def test_value(self): self.assertIn(value, [1, 2])\n").unwrap();
+    let (store, session) = Store::create(
+        home.path(),
+        root.path(),
+        "one".into(),
+        RunConfig {
+            auto_approve: true,
+            interactive_followups: true,
+            max_provider_requests: 10,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let (events, mut rx) = mpsc::unbounded_channel();
+    let (input, inputs) = mpsc::unbounded_channel();
+    let engine = Engine {
+        workspace: workspace_for(&session).unwrap(),
+        store,
+        session,
+        generator: Arc::new(Turns(AtomicUsize::new(0))),
+        cancel: CancellationToken::new(),
+        events,
+        input: inputs,
+        interactive: true,
+        approved: None,
+    };
+    let worker = tokio::spawn(engine.run());
+    let mut turns = 0;
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        while let Some(event) = rx.recv().await {
+            if event.kind == "input_ready" {
+                turns += 1;
+                input
+                    .send(if turns == 1 {
+                        UiInput::Message("two".into())
+                    } else {
+                        UiInput::Close
+                    })
+                    .unwrap();
+            }
+        }
+    })
+    .await
+    .unwrap();
+    let s = worker.await.unwrap().unwrap();
+    assert_eq!(turns, 2);
+    assert_eq!(s.status, RunStatus::Completed);
+    assert_eq!(s.metrics.simulated_turns, 7);
+    assert_eq!(s.metrics.decision_requests, 0);
+    assert_eq!(s.prior_user_requests, vec!["one"]);
+    assert_eq!(
+        fs::read_to_string(root.path().join("counter.py")).unwrap(),
+        "value = 2\n"
+    );
+    assert_eq!(
+        s.verified.as_ref().unwrap().revision,
+        workspace_for(&s).unwrap().revision().unwrap()
+    );
+    let (_, restored) = Store::resume(home.path(), &s.id).unwrap();
+    assert_eq!(restored.metrics.simulated_turns, 7);
+    assert_eq!(restored.prior_user_requests, s.prior_user_requests);
+}
+
+#[test]
+fn followup_rejects_unknown_effects_and_secrets_without_resetting_budgets() {
+    let root = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let (mut store, mut s) = Store::create(
+        home.path(),
+        root.path(),
+        "original constraints".into(),
+        Default::default(),
+    )
+    .unwrap();
+    store.redactor = s1code::privacy::Redactor::with_secrets(vec!["private-example-token".into()]);
+    s.metrics.generative_calls = 5;
+    s.steps = 12;
+    s.recovery_needed = true;
+    assert!(store.follow_up(&mut s, "change feature").is_err());
+    s.recovery_needed = false;
+    assert!(store.follow_up(&mut s, "private-example-token").is_err());
+    assert!(store.follow_up(&mut s, "").is_err());
+    assert!(s.prior_user_requests.is_empty());
+    store.follow_up(&mut s, "change feature").unwrap();
+    assert_eq!(s.prior_user_requests, vec!["original constraints"]);
+    assert_eq!(s.metrics.generative_calls, 5);
+    assert_eq!(s.steps, 12);
+    assert_eq!(s.config.max_provider_requests, 24);
+    assert!(s.pending.is_none() && s.proposals.is_empty() && s.verified.is_none());
+}

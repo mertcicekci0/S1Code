@@ -269,3 +269,8 @@ it in the home screen. `--effort medium` or `/effort medium` selects Claude effo
 Opus 5 and Sonnet 5 default to medium. Other models retain provider defaults, and
 unsupported explicit levels may be rejected by that provider. Thinking shares the
 output ceiling; its reported token count is a subset, not an extra total.
+
+Offline/isolated launchers may set `S1CODE_KEYCHAIN=off` to disable saved-key
+lookup entirely. Explicit environment keys still work. The offline home smoke
+check sets this flag so local saved credentials cannot turn a setup-error fixture
+into a provider call.

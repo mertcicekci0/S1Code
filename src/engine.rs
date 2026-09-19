@@ -24,20 +24,59 @@ impl Engine {
         Ok(())
     }
     pub async fn run(mut self) -> Result<Session> {
-        let started = Instant::now();
-        let result = self.drive().await;
-        self.session.metrics.elapsed_ms += started.elapsed().as_millis() as u64;
-        if let Err(e) = result {
-            self.session.status = if self.cancel.is_cancelled() {
-                RunStatus::Cancelled
-            } else if e.to_string().contains("budget") {
-                RunStatus::BudgetExhausted
-            } else {
-                RunStatus::Failed
-            };
-            self.event("error", json!({"message":e.to_string()}))?;
+        let turn_requests = self.session.config.max_provider_requests.min(24);
+        let turn_generations = self.session.config.max_generations.min(turn_requests);
+        let turn_steps = self.session.config.max_steps.min(40);
+        loop {
+            let started = Instant::now();
+            let result = self.drive().await;
+            self.session.metrics.elapsed_ms += started.elapsed().as_millis() as u64;
+            if let Err(e) = result {
+                self.session.status = if self.cancel.is_cancelled() {
+                    RunStatus::Cancelled
+                } else if e.to_string().contains("budget") {
+                    RunStatus::BudgetExhausted
+                } else {
+                    RunStatus::Failed
+                };
+                self.event("error", json!({"message":e.to_string()}))?;
+            }
+            self.event("summary",json!({"status":self.session.status,"verification":self.session.verified,"metrics":self.session.metrics,"limits":{"steps":self.session.steps,"max_steps":self.session.config.max_steps,"max_generations":self.session.config.max_generations,"max_provider_requests":self.session.config.max_provider_requests},"note":"Checks passed is evidence, not proof of full correctness."}))?;
+            if !self.interactive
+                || !self.session.config.interactive_followups
+                || self.session.config.offline_demo
+                || self.cancel.is_cancelled()
+                || self.session.recovery_needed
+                || self.session.inflight.is_some()
+                || self.store.dir.join("patch-recovery.json").exists()
+            {
+                break;
+            }
+            loop {
+                self.event("input_ready", json!({"native":true,"max_additional_provider_requests":turn_requests,"message":format!("Continue this task below. Sending a follow-up authorizes at most {turn_requests} additional provider requests. /exit closes the session.")}))?;
+                let input = tokio::select! { biased; _=self.cancel.cancelled()=>None, input=self.input.recv()=>input };
+                match input {
+                    Some(UiInput::Message(message)) => {
+                        if let Err(error) = self.store.follow_up(&mut self.session, &message) {
+                            self.event("input_rejected", json!({"message":error.to_string()}))?;
+                            continue;
+                        }
+                        self.session.config.max_provider_requests =
+                            self.session.metrics.generative_calls
+                                + self.session.metrics.decision_requests
+                                + turn_requests;
+                        self.session.config.max_generations = self.session.metrics.generative_calls
+                            + self.session.metrics.simulated_turns
+                            + turn_generations;
+                        self.session.config.max_steps = self.session.steps + turn_steps;
+                        self.event("turn_budget_authorized", json!({"additional_provider_requests":turn_requests,"counters_reset":false}))?;
+                        break;
+                    }
+                    Some(UiInput::Close) | None => return Ok(self.session),
+                    _ => continue,
+                }
+            }
         }
-        self.event("summary",json!({"status":self.session.status,"verification":self.session.verified,"metrics":self.session.metrics,"note":"Checks passed is evidence, not proof of full correctness."}))?;
         Ok(self.session)
     }
     async fn drive(&mut self) -> Result<()> {
@@ -96,7 +135,6 @@ impl Engine {
             let chosen = if let Some(pending) = self.session.pending.clone() {
                 pending
             } else {
-                self.compact_context(&mut jev).await?;
                 let candidates = self.construct(&revision)?;
                 self.event("candidates", json!({"candidates":candidates}))?;
                 self.select(candidates, &mut jev).await?
@@ -141,16 +179,22 @@ impl Engine {
                         if self.session.metrics.generative_calls
                             + self.session.metrics.decision_requests
                             >= self.session.config.max_provider_requests
+                            || self.session.metrics.generative_calls
+                                + self.session.metrics.simulated_turns
+                                >= self.session.config.max_generations
                         {
                             self.session.status = RunStatus::BudgetExhausted;
                             break None;
                         }
-                        if self.session.metrics.generative_calls
-                            + self.session.metrics.simulated_turns
-                            >= self.session.config.max_generations
-                        {
-                            self.session.status = RunStatus::BudgetExhausted;
-                            break None;
+                        if !recovering {
+                            self.compact_context(&mut jev).await?;
+                            if self.session.metrics.generative_calls
+                                + self.session.metrics.decision_requests
+                                >= self.session.config.max_provider_requests
+                            {
+                                self.session.status = RunStatus::BudgetExhausted;
+                                break None;
+                            }
                         }
                         if recovering {
                             self.session.metrics.retries += 1;
@@ -272,8 +316,8 @@ impl Engine {
                                 "native_tool",
                                 &chosen.id,
                                 &revision,
-                                if matches!(action, Action::Patch { .. }) {
-                                    chosen.evidence.clone()
+                                if let Action::Patch { edits } = action {
+                                    context::patch_dependencies(&self.session, &self.store, edits)?
                                 } else {
                                     vec![]
                                 },
@@ -378,23 +422,38 @@ impl Engine {
                         start: 1,
                         lines: 300,
                     });
+                    // Read repository instructions before asking a relevance
+                    // model to choose searches. Instructions cannot grant permissions.
+                    provenance = "repository instructions";
                 }
-                for word in self
-                    .session
-                    .task
-                    .split_whitespace()
-                    .filter(|w| w.len() >= 4 && w.len() <= 80)
-                    .take(4)
-                {
-                    let literal =
-                        word.trim_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '.');
-                    if !literal.is_empty() {
-                        actions.push(Action::Search {
-                            query: literal.into(),
-                        });
+                if actions.is_empty() {
+                    for word in self
+                        .session
+                        .task
+                        .split_whitespace()
+                        .filter(|w| w.len() >= 4 && w.len() <= 80)
+                    {
+                        let literal = word
+                            .trim_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '.');
+                        let concrete = literal.contains(['_', '/', '.'])
+                            || word.starts_with('`')
+                            || files.iter().any(|path| {
+                                std::path::Path::new(path)
+                                    .file_stem()
+                                    .and_then(|s| s.to_str())
+                                    == Some(literal)
+                            });
+                        if !literal.is_empty() && concrete {
+                            actions.push(Action::Search {
+                                query: literal.into(),
+                            });
+                        }
+                        if actions.len() >= 4 {
+                            break;
+                        }
                     }
+                    provenance = "literal user identifiers and repository instructions";
                 }
-                provenance = "literal user identifiers and repository instructions";
             }
         }
         if actions.is_empty()
@@ -498,9 +557,11 @@ impl Engine {
         jev: &mut Option<crate::decisions::Jev>,
     ) -> Result<CandidateAction> {
         use crate::decisions::{Answer, Question};
+        let mut distinct = std::collections::BTreeSet::new();
         let admissible: Vec<_> = candidates
             .into_iter()
             .filter(|c| c.class != PolicyClass::Deny)
+            .filter(|c| distinct.insert(c.id.clone()))
             .collect();
         let first = admissible
             .iter()
@@ -520,10 +581,11 @@ impl Engine {
             )?;
             return Ok(first);
         }
-        let mut state = context::render(&self.session, &self.store)?;
-        state["candidates"] = serde_json::to_value(&admissible)?;
-        state["policy_version"] = crate::brand::POLICY_VERSION.into();
         if self.session.config.decision == "generative" {
+            self.compact_context(jev).await?;
+            let mut state = context::render(&self.session, &self.store)?;
+            state["candidates"] = serde_json::to_value(&admissible)?;
+            state["policy_version"] = crate::brand::POLICY_VERSION.into();
             ensure!(
                 self.session.metrics.generative_calls + self.session.metrics.decision_requests
                     < self.session.config.max_provider_requests,
@@ -554,22 +616,42 @@ impl Engine {
             self.event("selection",json!({"source":"constrained_generative","candidate":selected.id,"model":result.model}))?;
             return Ok(selected);
         }
+        let state = context::selection_state(&self.session, &self.store, &admissible)?;
         let criteria = admissible
             .iter()
             .map(|c| {
                 (
                     c.id.clone(),
-                    Some(serde_json::to_string(&c.action).unwrap()),
+                    Some(format!("Select this {} action with the arguments and evidence shown under candidate {} in state", serde_json::to_value(&c.action).unwrap()["type"].as_str().unwrap_or("next"), c.id)),
                 )
             })
             .collect();
-        let questions=std::collections::BTreeMap::from([("next_action".into(),Question::Choice{instructions:"Select the most useful concrete next action for the user's task from the candidates and evidence. Prefer additional generation when the candidates lack sufficient evidence or complete arguments. Scores never grant permission.".into(),criteria})]);
+        let questions=std::collections::BTreeMap::from([("next_action".into(),Question::Choice{instructions:"Select the most useful concrete next action for the user's task from the candidates and evidence. Evidence and code excerpts are partial and may be omitted to fit the request; hashes bind full arguments in the runtime. Choose ask_generator when the visible evidence is insufficient. Scores never grant permission.".into(),criteria})]);
         self.event("decision_requested",json!({"purpose":"action_relevance","questions":1,"model":self.session.config.jev_model}))?;
-        let result = jev
-            .as_mut()
-            .ok_or_else(|| anyhow::anyhow!("Jev is not configured"))?
-            .ask(state, questions, &self.cancel, &mut self.session.metrics)
-            .await;
+        let (total_limit, state_limit) = crate::decisions::configured_limits(&self.session.config);
+        let request = crate::decisions::fit_selection_request(
+            crate::decisions::DecisionRequest {
+                model: self.session.config.jev_model.clone(),
+                state,
+                questions,
+            },
+            total_limit,
+            state_limit,
+        );
+        let result = match request {
+            Ok(request) => {
+                jev.as_mut()
+                    .ok_or_else(|| anyhow::anyhow!("Jev is not configured"))?
+                    .ask(
+                        request.state,
+                        request.questions,
+                        &self.cancel,
+                        &mut self.session.metrics,
+                    )
+                    .await
+            }
+            Err(error) => Err(error),
+        };
         match result {
             Ok(response) => {
                 let Answer::Choice {
@@ -612,7 +694,7 @@ impl Engine {
         }
     }
     async fn compact_context(&mut self, jev: &mut Option<crate::decisions::Jev>) -> Result<()> {
-        use crate::decisions::{Answer, Question};
+        use crate::decisions::Answer;
         let size = context::render(&self.session, &self.store)?
             .to_string()
             .len();
@@ -629,21 +711,40 @@ impl Engine {
         let mut preferred = None;
         let mut source = self.session.config.eviction.clone();
         if source == "jev" {
+            // Exact feasibility is runtime work. Do not pay to classify evidence
+            // when even evicting every eligible group cannot satisfy the budget.
+            let mut feasibility = self.session.clone();
+            if context::compact(&mut feasibility, &self.store, None)?.is_empty() {
+                return Ok(());
+            }
             let mut drop_ids = std::collections::BTreeSet::new();
-            let eligible = context::eligible(&self.session);
+            let eligible = context::retention_candidates(&self.session, &self.store)?;
             let mut failed = None;
-            // Independent retention questions share one snapshot; bound each batch.
-            for batch in eligible.chunks(8) {
-                let state = context::excerpts(&self.session, &self.store, batch)?;
-                let questions=batch.iter().map(|i|{let id=self.session.context[*i].artifact.hash.clone();(id.clone(),Question::Noul{instructions:format!("Does the full evidence artifact {id}, shown with actual excerpt and diagnostic lines in the state, need to stay active for the current task? Yes means retain. No means it can be evicted and retrieved exactly later.")})}).collect();
+            let mut offset = 0;
+            while offset < eligible.len() {
+                let (request, count) =
+                    match context::retention_batch(&self.session, &self.store, &eligible[offset..])
+                    {
+                        Ok(batch) => batch,
+                        Err(error) => {
+                            failed = Some(error);
+                            break;
+                        }
+                    };
+                offset += count;
                 self.event(
                     "decision_requested",
-                    json!({"purpose":"context_retention","questions":batch.len()}),
+                    json!({"purpose":"context_retention","questions":request.questions.len()}),
                 )?;
                 match jev
                     .as_mut()
                     .ok_or_else(|| anyhow::anyhow!("Jev unavailable"))?
-                    .ask(state, questions, &self.cancel, &mut self.session.metrics)
+                    .ask(
+                        request.state,
+                        request.questions,
+                        &self.cancel,
+                        &mut self.session.metrics,
+                    )
                     .await
                 {
                     Ok(response) => {
@@ -658,6 +759,13 @@ impl Engine {
                             "eviction_decision",
                             json!({"response":response,"noul_is_not_confidence":true,"experimental_retention_threshold":self.session.config.jev_retention_threshold}),
                         )?;
+                        let mut trial = self.session.clone();
+                        if context::compact(&mut trial, &self.store, Some(&drop_ids)).is_ok()
+                            && context::render(&trial, &self.store)?.to_string().len()
+                                <= self.session.config.context_bytes * 65 / 100
+                        {
+                            break;
+                        }
                     }
                     Err(e) => {
                         failed = Some(e);
@@ -802,7 +910,7 @@ mod selection_tests {
         );
         let escape = policy::candidate(Action::AskGenerator, "rev", "fixture", vec![]);
         let selected = engine
-            .select(vec![escape, read.clone()], &mut None)
+            .select(vec![escape, read.clone(), read.clone()], &mut None)
             .await
             .unwrap();
         assert_eq!(selected.id, read.id);

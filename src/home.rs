@@ -19,7 +19,7 @@ use std::{io, path::PathBuf};
 
 const ACCENT: Color = Color::Rgb(111, 211, 194);
 const MUTED: Color = Color::Rgb(151, 163, 177);
-pub const HELP: &str = "/provider codex|openai|claude  /model MODEL  /effort LEVEL  /output-limit TOKENS  /decision rules|jev|generative\n/jev openrouter|typesafe  /workspace PATH  /permissions manual|full-access  /login  /account  /sessions\n/resume ID  /continue ID (Codex)  /demo  /claude-code  /help  /exit\nNative keys: OPENAI_API_KEY or ANTHROPIC_API_KEY; Jev: OPENROUTER_API_KEY or TYPESAFE_API_KEY. Set keys in the environment, never in this prompt.";
+pub const HELP: &str = "/provider codex|openai|claude  /model MODEL  /effort LEVEL  /output-limit TOKENS  /decision rules|jev|generative\n/jev openrouter|typesafe  /eviction jev|conservative|off  /workspace PATH  /permissions manual|full-access  /login  /account  /sessions\n/resume ID  /continue ID (Codex)  /demo  /claude-code  /help  /exit\nNative keys: OPENAI_API_KEY or ANTHROPIC_API_KEY; Jev: OPENROUTER_API_KEY or TYPESAFE_API_KEY. Set keys in the environment, never in this prompt.";
 
 #[derive(Clone)]
 pub struct Settings {
@@ -30,6 +30,7 @@ pub struct Settings {
     pub model: Option<String>,
     pub decision: String,
     pub jev_provider: String,
+    pub eviction: String,
     pub workspace: PathBuf,
 }
 impl Default for Settings {
@@ -42,6 +43,7 @@ impl Default for Settings {
             model: None,
             decision: "rules".into(),
             jev_provider: "typesafe".into(),
+            eviction: "conservative".into(),
             workspace: std::env::current_dir().unwrap_or_else(|_| ".".into()),
         }
     }
@@ -64,6 +66,7 @@ impl Settings {
             ("effort", "/effort"),
             ("decision", "/decision"),
             ("jev_provider", "/jev"),
+            ("eviction", "/eviction"),
         ] {
             if key != "provider" && settings.provider == "codex" && key != "model" {
                 continue;
@@ -88,7 +91,7 @@ impl Settings {
         crate::session::atomic_write(
             &home.join("preferences-v1.json"),
             &serde_json::to_vec_pretty(
-                &serde_json::json!({"version":1,"provider":self.provider,"model":self.model,"decision":self.decision,"jev_provider":self.jev_provider,"effort":self.effort,"max_output_tokens":self.max_output_tokens}),
+                &serde_json::json!({"version":1,"provider":self.provider,"model":self.model,"decision":self.decision,"jev_provider":self.jev_provider,"eviction":self.eviction,"effort":self.effort,"max_output_tokens":self.max_output_tokens}),
             )?,
         )
     }
@@ -97,7 +100,7 @@ impl Settings {
             "ChatGPT account · Codex owns execution · Jev not active".into()
         } else {
             format!(
-                "Native · S1Code executes tools · decisions: {}{}{}",
+                "Native · S1Code executes tools · decisions: {}{}{} · context: {}",
                 self.decision,
                 if self.decision == "jev" {
                     format!(" via {}", self.jev_provider)
@@ -108,7 +111,8 @@ impl Settings {
                     " · AUTO APPROVE (supported actions)"
                 } else {
                     ""
-                }
+                },
+                self.eviction
             )
         }
     }
@@ -149,7 +153,7 @@ impl Settings {
                 "missing"
             }
         );
-        if self.decision == "jev" {
+        if self.decision == "jev" || self.eviction == "jev" {
             let key = if self.jev_provider == "openrouter" {
                 "OPENROUTER_API_KEY"
             } else {
@@ -250,6 +254,17 @@ pub fn interpret(line: &str, settings: &mut Settings) -> Result<Option<Command>>
                 Some(args.into())
             };
         }
+        "/eviction" => {
+            ensure!(
+                settings.provider != "codex",
+                "Codex owns its context; choose a native provider first"
+            );
+            ensure!(
+                ["jev", "conservative", "off"].contains(&args),
+                "Use /eviction jev|conservative|off"
+            );
+            settings.eviction = args.into();
+        }
         "/output-limit" => {
             let limit: u32 = args.parse().context("Use /output-limit 16384")?;
             ensure!(
@@ -314,7 +329,7 @@ impl Editor {
             self.cursor += 1;
         }
     }
-    fn layout(&self, width: usize) -> (Vec<String>, usize, usize) {
+    pub(crate) fn layout(&self, width: usize) -> (Vec<String>, usize, usize) {
         let width = width.max(1);
         let mut lines = vec![String::new()];
         let (mut row, mut col) = (0, 0);

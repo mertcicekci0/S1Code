@@ -31,6 +31,7 @@ with tempfile.TemporaryDirectory(prefix='s1code-home-') as directory:
     for key in ['ANTHROPIC_API_KEY','ANTHROPIC_AUTH_TOKEN','CLAUDE_CODE_OAUTH_TOKEN','OPENAI_API_KEY','TYPESAFE_API_KEY','OPENROUTER_API_KEY']:
         env.pop(key,None)
     env.update(TERM='xterm-256color',PATH=str(fakebin)+os.pathsep+env.get('PATH',''),
+               S1CODE_KEYCHAIN='off',
                OPENAI_API_KEY='fixture-only-secret',OPENROUTER_API_KEY='fixture-only-secret')
     master, slave = pty.openpty()
     fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',30,100,0,0))

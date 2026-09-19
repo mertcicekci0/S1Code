@@ -1,5 +1,8 @@
 # Demonstration
 
+For a live task and a follow-up typed directly in the terminal, use the
+[interactive demo runbook](demo-runbook.md). No launch script is required.
+
 ## Normal task entry
 
 Run `./target/release/s1code` to open the real task-entry screen. This is not a

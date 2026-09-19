@@ -118,3 +118,8 @@ interactive entry selects the labeled Codex bridge; native CLI `run` defaults re
 OpenAI/rules. The task-entry UI is independent of the engine. See ADR 003 for Claude
 API versus official terminal-handoff ownership and the absence of inherited task
 context between new prompts.
+
+Native conversations now retain exact prior user requests across bounded follow-ups.
+Jev receives focused relevance snapshots and adaptive retention batches; full
+arguments remain in the runtime. See [ADR 008](adr/008-bounded-followups-and-decisions.md)
+for budget ownership, context dependencies and recoverable directory creation.
