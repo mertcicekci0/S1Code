@@ -62,6 +62,10 @@ fn auth_command(operation: &str) -> Result<tokio::process::Command> {
         command.arg("--claudeai");
     }
     if operation == "status" {
+        // Match terminal handoff billing when the user explicitly exports a key.
+        if let Some(key) = std::env::var_os("ANTHROPIC_API_KEY") {
+            command.env("ANTHROPIC_API_KEY", key);
+        }
         command.arg("--json");
     }
     Ok(command)
