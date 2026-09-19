@@ -44,7 +44,7 @@ and no cost, speed or task-quality superiority claim is established.
 
 ## Verification recorded locally
 
-- 54 offline Rust tests and 12 Python launcher/comparison tests passed. Coverage includes
+- 57 offline Rust tests and 12 Python launcher/comparison tests passed. Coverage includes
   fragmented streams, invalid decisions, retries, stale candidates, policy bypass,
   traversal/symlinks, concurrent edits, patch recovery, pinned overflow, exact
   rehydration, dependency closure, cancellation, restart, duplicate bridge requests,
@@ -136,3 +136,13 @@ environment mutation. Credential lookup errors never include captured key output
 Interactive home supports explicit `/permissions full-access` for native tasks,
 shows auto-approval state and resets consent on provider change. Users can paste
 tasks directly into the home input without a shell wrapper.
+
+Response recovery and terminal readability: Claude terminal stop reasons are now
+recorded distinctly, including usage for complete truncated responses. A max_tokens
+response permits one smaller-action retry within existing generation/request caps;
+refusals and incomplete transport streams do not retry. Partial actions never run.
+Long tasks are folded in conversation while exact text remains in Activity;
+paste preserves newlines, tool progress/recovery are readable and empty assistant
+sections are hidden. The previously failed live Snake trace did not retain its stop
+reason, so its root cause cannot be established retrospectively. A successful live
+Snake build remains unverified; offline recovery tests are not a live success claim.

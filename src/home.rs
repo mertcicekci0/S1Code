@@ -231,7 +231,7 @@ impl Editor {
                 break;
             }
             self.text
-                .insert(self.cursor, if c == '\n' || c == '\t' { ' ' } else { c });
+                .insert(self.cursor, if c == '\t' { ' ' } else { c });
             self.cursor += 1;
         }
     }
@@ -328,7 +328,13 @@ fn draw(f: &mut Frame, settings: &Settings, editor: &Editor, messages: &[String]
     );
     let width = rows[3].width.saturating_sub(4) as usize;
     let start = editor.cursor.saturating_sub(width.saturating_sub(1));
-    let visible: String = editor.text.iter().skip(start).take(width).collect();
+    let visible: String = editor
+        .text
+        .iter()
+        .skip(start)
+        .take(width)
+        .map(|c| if *c == '\n' { '↵' } else { *c })
+        .collect();
     f.render_widget(
         Paragraph::new(if editor.text.is_empty() {
             "Describe your task, or /help"
@@ -347,6 +353,7 @@ fn draw(f: &mut Frame, settings: &Settings, editor: &Editor, messages: &[String]
         .iter()
         .skip(start)
         .take(editor.cursor - start)
+        .map(|c| if *c == '\n' { '↵' } else { *c })
         .collect();
     let cursor_x = Line::raw(prefix).width().min(width) as u16;
     if rows[3].height >= 3 && rows[3].width >= 4 {
@@ -482,7 +489,7 @@ mod tests {
         editor.key(KeyCode::Delete);
         editor.key(KeyCode::End);
         editor.insert("\n/help\u{1b}");
-        assert_eq!(editor.take(), "ş hatayı düzelt /help");
+        assert_eq!(editor.take(), "ş hatayı düzelt\n/help");
         assert_eq!(editor.cursor, 0);
     }
 }

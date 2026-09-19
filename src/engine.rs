@@ -136,50 +136,82 @@ impl Engine {
             *self.session.seen.entry(fingerprint).or_default() += 1;
             match &chosen.action {
                 Action::AskGenerator => {
-                    if self.session.metrics.generative_calls
-                        + self.session.metrics.decision_requests
-                        >= self.session.config.max_provider_requests
-                    {
-                        self.session.status = RunStatus::BudgetExhausted;
-                        break;
-                    }
-                    if self.session.metrics.generative_calls + self.session.metrics.simulated_turns
-                        >= self.session.config.max_generations
-                    {
-                        self.session.status = RunStatus::BudgetExhausted;
-                        break;
-                    }
-                    if self.generator.simulated() {
-                        self.session.metrics.simulated_turns += 1;
-                    } else {
-                        self.session.metrics.generative_calls += 1;
-                    }
-                    self.event("generation_requested",json!({"purpose":"plan_or_propose_next_action","simulated":self.generator.simulated()}))?;
-                    let input = context::render(&self.session, &self.store)?;
-                    let (tx, mut rx) = mpsc::unbounded_channel();
-                    let mut display =
-                        crate::privacy::StreamRedactor::new(self.store.redactor.clone());
-                    let generator = Arc::clone(&self.generator);
-                    let cancel = self.cancel.clone();
-                    let future = generator.generate(input, &cancel, tx);
-                    tokio::pin!(future);
+                    let mut recovering = false;
                     let response = loop {
-                        tokio::select! {result=&mut future=>break result?,Some(delta)=rx.recv()=>{let _=self.events.send(RunEvent{seq:0,session:self.session.id.clone(),kind:"stream".into(),data:json!({"delta":display.push(&delta)})});}}
-                    };
-                    while let Ok(delta) = rx.try_recv() {
+                        if self.session.metrics.generative_calls
+                            + self.session.metrics.decision_requests
+                            >= self.session.config.max_provider_requests
+                        {
+                            self.session.status = RunStatus::BudgetExhausted;
+                            break None;
+                        }
+                        if self.session.metrics.generative_calls
+                            + self.session.metrics.simulated_turns
+                            >= self.session.config.max_generations
+                        {
+                            self.session.status = RunStatus::BudgetExhausted;
+                            break None;
+                        }
+                        if recovering {
+                            self.session.metrics.retries += 1;
+                        }
+                        if self.generator.simulated() {
+                            self.session.metrics.simulated_turns += 1;
+                        } else {
+                            self.session.metrics.generative_calls += 1;
+                        }
+                        self.event("generation_requested",json!({"purpose":"plan_or_propose_next_action","simulated":self.generator.simulated()}))?;
+                        let mut input = context::render(&self.session, &self.store)?;
+                        if recovering {
+                            input["generation_recovery"] = json!(
+                                "The previous response hit its output limit and was discarded; no proposed action ran. Return exactly one small action. For code, create/edit only one file with a compact implementation; continue other files on later turns. Do not repeat the incomplete response."
+                            );
+                        }
+                        let (tx, mut rx) = mpsc::unbounded_channel();
+                        let mut display =
+                            crate::privacy::StreamRedactor::new(self.store.redactor.clone());
+                        let generator = Arc::clone(&self.generator);
+                        let cancel = self.cancel.clone();
+                        let future = generator.generate(input, &cancel, tx);
+                        tokio::pin!(future);
+                        let response = loop {
+                            tokio::select! {result=&mut future=>break result,Some(delta)=rx.recv()=>{let _=self.events.send(RunEvent{seq:0,session:self.session.id.clone(),kind:"stream".into(),data:json!({"delta":display.push(&delta)})});}}
+                        };
+                        while let Ok(delta) = rx.try_recv() {
+                            let _ = self.events.send(RunEvent {
+                                seq: 0,
+                                session: self.session.id.clone(),
+                                kind: "stream".into(),
+                                data: json!({"delta":display.push(&delta)}),
+                            });
+                        }
                         let _ = self.events.send(RunEvent {
                             seq: 0,
                             session: self.session.id.clone(),
                             kind: "stream".into(),
-                            data: json!({"delta":display.push(&delta)}),
+                            data: json!({"delta":display.finish()}),
                         });
-                    }
-                    let _ = self.events.send(RunEvent {
-                        seq: 0,
-                        session: self.session.id.clone(),
-                        kind: "stream".into(),
-                        data: json!({"delta":display.finish()}),
-                    });
+                        match response {
+                            Ok(response) => break Some(response),
+                            Err(error) => {
+                                if let Some(incomplete) =
+                                    error.downcast_ref::<crate::claude::IncompleteResponse>()
+                                {
+                                    self.session.metrics.usage.push(incomplete.usage.clone());
+                                    self.event("generation_incomplete", json!({"stop_reason":incomplete.reason,"usage":incomplete.usage,"partial_actions_discarded":true}))?;
+                                    if incomplete.reason == "max_tokens" && !recovering {
+                                        recovering = true;
+                                        self.event("generation_recovery", json!({"message":"Response reached its output limit. Discarded partial actions; requesting one smaller action within the remaining budget."}))?;
+                                        continue;
+                                    }
+                                }
+                                return Err(error);
+                            }
+                        }
+                    };
+                    let Some(response) = response else {
+                        break;
+                    };
                     ensure!(
                         !self
                             .store

@@ -361,7 +361,15 @@ impl Screen {
         match e.kind.as_str() {
             "started" | "delegation_started" => {
                 self.task = string(v, "task").into();
-                self.message("You", string(v, "task"));
+                let task = string(v, "task");
+                let preview = task.lines().take(3).collect::<Vec<_>>().join("\n");
+                let preview: String = preview.chars().take(240).collect();
+                let preview = if preview != task {
+                    format!("{preview}…\nFull task: F2 → Activity → started → Enter")
+                } else {
+                    preview
+                };
+                self.message("You", &preview);
                 self.awaiting_input = false;
                 self.status = "Working".into();
             }
@@ -370,6 +378,21 @@ impl Screen {
                 self.stream = crate::tools::bound(&self.stream, 512 * 1024);
                 self.upstream_stream = false;
                 return;
+            }
+            "generation_requested" => {
+                self.stream.clear();
+                self.status = "Preparing next action…".into();
+            }
+            "generation_incomplete" => {
+                self.stream.clear();
+            }
+            "generation_recovery" => {
+                self.message("Recovery", string(v, "message"));
+                self.stream.clear();
+            }
+            "tool_started" => {
+                self.status = "Executing action…".into();
+                self.message("Tool", &action_text(&v["candidate"]["action"]));
             }
             "proposal" => {
                 self.message("Assistant", string(v, "message"));
@@ -386,7 +409,10 @@ impl Screen {
                     }
                 }
             }
-            "error" | "tool_error" => self.message("Error", &details(&e)),
+            "error" | "tool_error" => {
+                self.stream.clear();
+                self.message("Error", &details(&e));
+            }
             "no_progress" => self.message("Stopped", string(v, "message")),
             "blocked" => self.message("Blocked", string(v, "reason")),
             "candidates" => self.candidates = v.clone(),
@@ -494,8 +520,12 @@ impl Screen {
     }
     fn draw(&mut self, f: &mut Frame, label: &str) {
         let pending_h = if self.pending.is_some() { 5 } else { 0 };
+        let header_height = (1 + Line::raw(label)
+            .width()
+            .div_ceil(f.area().width.max(1) as usize))
+        .min(5) as u16;
         let rows = Layout::vertical([
-            Constraint::Length(2),
+            Constraint::Length(header_height),
             Constraint::Length(if self.inspect { 2 } else { 0 }),
             Constraint::Length(pending_h),
             Constraint::Min(1),
@@ -514,7 +544,9 @@ impl Screen {
                     } else {
                         &self.status
                     },
-                    Style::default().fg(if self.pending.is_some() {
+                    Style::default().fg(if self.status.eq_ignore_ascii_case("failed") {
+                        Color::Red
+                    } else if self.pending.is_some() {
                         GOLD
                     } else {
                         Color::White
@@ -557,16 +589,29 @@ impl Screen {
                 } else {
                     visible_message(&self.stream)
                 };
-                text.push_str(&format!(
-                    "
-Assistant
-{streaming}"
-                ));
+                if !streaming.is_empty() {
+                    text.push_str(&format!("\nAssistant\n{streaming}"));
+                }
             }
             if text.is_empty() {
                 text = "Connecting…".into();
             }
-            let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
+            let lines: Vec<Line> = text
+                .lines()
+                .map(|line| {
+                    let style = match line {
+                        "You" | "Assistant" => {
+                            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                        }
+                        "Tool" => Style::default().fg(MUTED),
+                        "Error" => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                        "Recovery" => Style::default().fg(GOLD),
+                        _ => Style::default(),
+                    };
+                    Line::styled(line.to_owned(), style)
+                })
+                .collect();
+            let paragraph = Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false });
             let end = paragraph
                 .line_count(body.width)
                 .saturating_sub(body.height as usize)
@@ -796,6 +841,33 @@ mod tests {
             .map(|row| row.iter().map(|c| c.symbol()).collect::<String>())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+    #[test]
+    fn long_task_is_folded_but_inspectable_and_recovery_removes_partial_stream() {
+        let task = format!(
+            "Build a game\n{}\nlast requirement",
+            "detailed requirement\n".repeat(40)
+        );
+        let mut screen = Screen::default();
+        screen.receive(event("started", json!({"task":task})));
+        assert_eq!(screen.task, task);
+        assert_eq!(screen.entries[0].data["task"], task);
+        screen.receive(event("stream", json!({"delta":"{\"message\":\"partial"})));
+        screen.receive(event(
+            "generation_incomplete",
+            json!({"stop_reason":"max_tokens"}),
+        ));
+        screen.receive(event(
+            "generation_recovery",
+            json!({"message":"Requesting one smaller action"}),
+        ));
+        for width in [45, 100] {
+            let view = render(&mut screen, width);
+            assert!(view.contains("Full task:"));
+            assert!(view.contains("smaller action"));
+            assert!(!view.contains("partial"));
+            assert!(!view.contains("last requirement"));
+        }
     }
     #[test]
     fn conversation_hides_protocol_and_keeps_full_wrapped_reply() {

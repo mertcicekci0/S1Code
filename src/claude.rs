@@ -198,11 +198,33 @@ fn decode_proposal(text: &str) -> Result<crate::domain::Proposal> {
     Ok(proposal)
 }
 
+/// Terminal metadata only: never retains partial code or hidden reasoning.
+#[derive(Debug)]
+pub struct IncompleteResponse {
+    pub reason: String,
+    pub usage: Usage,
+}
+impl std::fmt::Display for IncompleteResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let explanation = match self.reason.as_str() {
+            "max_tokens" => "output token limit reached; partial actions discarded",
+            "refusal" => "provider refused the response; no action accepted",
+            "model_context_window_exceeded" => {
+                "provider context window exceeded; no action accepted"
+            }
+            _ => "unsupported completion reason; no action accepted",
+        };
+        write!(f, "Claude stop_reason={}: {explanation}", self.reason)
+    }
+}
+impl std::error::Error for IncompleteResponse {}
+
 #[derive(Default)]
 struct Message {
     started: bool,
     ended: bool,
     stopped: bool,
+    stop_reason: Option<String>,
     block: Option<(u64, bool)>,
     next_index: u64,
     text: String,
@@ -301,9 +323,22 @@ impl Message {
                     "invalid Claude message delta"
                 );
                 if !event["delta"]["stop_reason"].is_null() {
-                    ensure!(
-                        event["delta"]["stop_reason"] == "end_turn",
-                        "Claude response refused or incomplete; no action accepted"
+                    let reason = event["delta"]["stop_reason"]
+                        .as_str()
+                        .context("invalid Claude stop_reason")?;
+                    // Only known protocol constants enter logs; no arbitrary provider text.
+                    self.stop_reason = Some(
+                        match reason {
+                            "end_turn"
+                            | "max_tokens"
+                            | "refusal"
+                            | "model_context_window_exceeded"
+                            | "tool_use"
+                            | "pause_turn"
+                            | "stop_sequence" => reason,
+                            _ => "unknown",
+                        }
+                        .into(),
                     );
                     self.ended = true;
                 }
@@ -333,6 +368,13 @@ impl Message {
     }
     fn finish(self) -> Result<GenerationResult> {
         ensure!(self.stopped, "Claude stream ended without message_stop");
+        if self.stop_reason.as_deref() != Some("end_turn") {
+            return Err(IncompleteResponse {
+                reason: self.stop_reason.unwrap_or_else(|| "unknown".into()),
+                usage: self.usage,
+            }
+            .into());
+        }
         let proposal = decode_proposal(&self.text)?;
         validate(&proposal)?;
         Ok(GenerationResult {

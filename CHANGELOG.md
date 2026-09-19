@@ -1,7 +1,12 @@
 # Changelog
 
-## Unreleased — Snake comparison and automatic approvals
+## Unreleased — Native usability and recovery
 
+- Distinct Claude stop reasons, bounded smaller-action recovery after output
+  truncation, and preserved failure usage. No partial action is executed.
+- Compact task display, preserved pasted newlines and visible tool/recovery activity.
+- Direct native CLI reuses saved macOS Keychain credentials; interactive home
+  supports `/permissions full-access`.
 - Explicit native `--auto-approve` / `--full-access` grants consent for supported
   actions, persists on resume, logs each exact candidate/diff and remains visible.
   Denies, stale checks, path protections and cancellation remain enforced.

@@ -254,3 +254,9 @@ A native session's total budget can be explicitly updated with `s1code resume ID
 including already-used requests, not extra allowances. The update is recorded and
 counters are never reset. Caps cannot be lower than usage already recorded. This is
 unsupported for delegated Codex inference whose internal calls remain unknown.
+
+Claude output recovery: `max_tokens` is recorded separately from refusal. Native
+planning permits at most one retry asking for one smaller action, inside the same
+request/generation caps; usage from both completed responses is counted. Refusals,
+unknown stop reasons and transport-truncated streams do not trigger that retry.
+Partial proposals are discarded, never executed or joined to later JSON.

@@ -87,3 +87,9 @@ or runtime implementation was copied. Installed Claude Code 2.1.266 help and the
 official [CLI reference](https://code.claude.com/docs/en/cli-reference) verified
 managed interactive startup, explicit model, safe mode and strict MCP configuration.
 No Claude credentials were inspected; no provider was called during preparation.
+
+- Claude stop reasons and structured-output truncation: official
+  https://platform.claude.com/docs/en/build-with-claude/handling-stop-reasons and
+  https://platform.claude.com/docs/en/build-with-claude/structured-outputs consulted
+  2026-09-19. Applied distinct terminal diagnostics and bounded max_tokens recovery;
+  no source code copied.

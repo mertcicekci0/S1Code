@@ -350,3 +350,106 @@ async fn exhausted_provider_budget_does_not_discard_an_approved_concrete_action(
     assert_eq!(result.metrics.simulated_turns, 0);
     assert_eq!(result.metrics.decision_requests, 1);
 }
+
+#[tokio::test]
+async fn truncated_generation_recovery_is_bounded_counted_and_never_executes_partial_actions() {
+    use s1code::generation::{GenerationResult, Generator};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Responses {
+        calls: AtomicUsize,
+        reason: &'static str,
+        always_fail: bool,
+    }
+    #[async_trait::async_trait]
+    impl Generator for Responses {
+        async fn generate(
+            &self,
+            input: serde_json::Value,
+            _: &CancellationToken,
+            _: mpsc::UnboundedSender<String>,
+        ) -> anyhow::Result<GenerationResult> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            if call == 0 || self.always_fail {
+                return Err(s1code::claude::IncompleteResponse {
+                    reason: self.reason.into(),
+                    usage: Usage {
+                        output_tokens: Some(8192),
+                        ..Default::default()
+                    },
+                }
+                .into());
+            }
+            assert!(
+                input["generation_recovery"]
+                    .as_str()
+                    .unwrap()
+                    .contains("one small action")
+            );
+            Ok(GenerationResult {
+                proposal: Proposal {
+                    message: "Fixture recovered safely".into(),
+                    actions: vec![Action::Blocked {
+                        reason: "Fixture stops without writes".into(),
+                    }],
+                },
+                usage: Usage {
+                    output_tokens: Some(12),
+                    ..Default::default()
+                },
+                model: "offline-fixture".into(),
+            })
+        }
+    }
+    for (reason, always_fail, budget, expected, calls) in [
+        ("max_tokens", false, 4, RunStatus::Blocked, 2),
+        ("max_tokens", false, 1, RunStatus::BudgetExhausted, 1),
+        ("max_tokens", true, 4, RunStatus::Failed, 2),
+        ("refusal", false, 4, RunStatus::Failed, 1),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let (store, session) = Store::create(
+            home.path(),
+            root.path(),
+            "Create a site".into(),
+            RunConfig {
+                max_provider_requests: budget,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let generator = Arc::new(Responses {
+            calls: AtomicUsize::new(0),
+            reason,
+            always_fail,
+        });
+        let (events, mut rx) = mpsc::unbounded_channel();
+        let (_tx, inputs) = mpsc::unbounded_channel();
+        let result = Engine {
+            workspace: workspace_for(&session).unwrap(),
+            generator: generator.clone(),
+            store,
+            session,
+            cancel: CancellationToken::new(),
+            events,
+            input: inputs,
+            interactive: false,
+            approved: None,
+        }
+        .run()
+        .await
+        .unwrap();
+        assert_eq!(result.status, expected);
+        assert_eq!(generator.calls.load(Ordering::SeqCst), calls);
+        assert_eq!(result.metrics.generative_calls, calls as u64);
+        assert_eq!(result.metrics.retries, (calls - 1) as u64);
+        assert_eq!(result.metrics.usage.len(), calls);
+        assert_eq!(result.metrics.usage[0].output_tokens, Some(8192));
+        while let Some(event) = rx.recv().await {
+            if event.kind == "tool_started" {
+                assert_ne!(event.data["candidate"]["action"]["type"], "patch");
+            }
+        }
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+}

@@ -623,3 +623,30 @@ async fn claude_http_rejection_reports_sanitized_reason_without_retry() {
         assert_eq!(server.await.unwrap().len(),1);
     }
 }
+
+#[tokio::test]
+async fn claude_terminal_failures_keep_reason_and_usage_without_partial_proposal() {
+    for reason in ["max_tokens", "refusal", "pause_turn"] {
+        let (url, server) = mock(vec![(
+            200,
+            claude_wire(claude_events("{incomplete", reason)),
+        )])
+        .await;
+        let generator =
+            s1code::claude::Claude::new("fixture-key".into(), "claude-fixture", &url).unwrap();
+        let (tx, _) = mpsc::unbounded_channel();
+        let error = generator
+            .generate(json!({}), &CancellationToken::new(), tx)
+            .await
+            .err()
+            .unwrap();
+        let failure = error
+            .downcast_ref::<s1code::claude::IncompleteResponse>()
+            .unwrap();
+        assert_eq!(failure.reason, reason);
+        assert_eq!(failure.usage.output_tokens, Some(8));
+        assert!(error.to_string().contains(reason));
+        assert!(!error.to_string().contains("{incomplete"));
+        assert_eq!(server.await.unwrap().len(), 1); // Adapter never hides another request.
+    }
+}
