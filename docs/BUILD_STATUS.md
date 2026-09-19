@@ -1,4 +1,4 @@
-# Build status — 0.3.0-rc.6
+# Build status — 0.3.0-rc.7
 
 Experimental source release candidate, prepared 2026-09-19. This is a bounded coding
 agent for trusted repositories, not a stable unrestricted automation product.
@@ -18,7 +18,7 @@ Cost, speed and task-quality advantages have not been established.
   answer validation, two request limits, cancellation, bounded retries and exact
   caching. Focused relevance evidence and independently batched retention questions.
 - Bounded repository listing/search/read, Git inspection, exact replacements and
-  recoverable multi-file patches. Python unittest, exact Node test and offline Cargo
+  recoverable multi-file patches. Python unittest, Node test, pytest, approved npm scripts and offline Cargo
   test/check commands execute only after manual or explicit session-wide consent.
 - Directory validation covers explicit test-discovery paths before approval and
   again before spawning. Exclusions, ignored paths, symlinks and duplicate start
@@ -42,6 +42,12 @@ Cost, speed and task-quality advantages have not been established.
   and context are upstream-owned. Official Claude Code terminal handoff is separate.
 - Standalone macOS hidden API-key setup via Keychain; existing entries are reused.
   Environment overrides remain explicit. No provider call during key storage.
+- Official Claude account commands with identity-filtered status and an optional
+  MCP stdio companion for batched Jev evidence ranking. Required request cap,
+  cancellation, exact caching, bounded inputs and no local execution or host-context
+  replacement. OAuth account flow stays in the official client.
+- Existing npm test/build/lint/typecheck scripts and installed pytest are supported
+  with explicit execution consent; scripts and plugins remain trusted code.
 - Offline demos with real tools, context-pressure probe, protected fixture checks,
   matched-policy evaluation tooling and source/history publication scanning.
 - Reproducible source archives from clean commits, checksums and license inventory.
@@ -49,11 +55,11 @@ Cost, speed and task-quality advantages have not been established.
 
 ## Verification
 
-Local macOS ARM64 validation of rc.6 passed:
+Local macOS ARM64 validation of rc.7 passed:
 
-- 95 offline Rust tests, 12 Python tests, formatting and all-target clippy with
+- 107 offline Rust tests, 12 Python tests, formatting and all-target clippy with
   warnings denied; optimized release build.
-- Five headless/PTY checks: real parser failure/patch/verification with three exact
+- Five headless/PTY checks plus an MCP binary protocol check: real parser failure/patch/verification with three exact
   approvals, resize, home navigation, same-thread conversations, safe resume,
   local inspection commands, redacted export and terminal restoration.
 - Hidden credential-input mismatch rejection and restored echo, without changing
@@ -87,6 +93,10 @@ in [dependency-audit.md](dependency-audit.md).
 - Native commands execute trusted repository code without OS filesystem/network
   isolation. Process groups cannot contain deliberately detached processes. The
   file-tool allowlist cannot restrict what approved repository code accesses.
+- Claude Code companion tool discovery and wire behavior are tested; subscription
+  login completion requires the user's official interactive account flow. MCP ranking
+  is host-invoked advice, not automatic compaction or a controlled native loop. Its
+  process budget resets on restart and is not a monetary or daily cap.
 - No arbitrary shell, package installation, binary/delete/rename patches, daemon,
   swarms, local learned policy, or automatic commit/push. Auto-approval applies only
   to supported native actions. It is not unrestricted access.

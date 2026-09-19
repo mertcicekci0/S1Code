@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0-rc.7
+
+- Official Claude account login/status/logout commands, without importing tokens
+  or treating subscription login as native API authentication.
+- Optional MCP stdio evidence companion: batched Jev relevance ranking, explicit
+  request allowance, exact caching, cancellation and bounded inputs. Host-owned
+  execution and context remain distinct from the native loop.
+- Approved existing npm test/build/lint/typecheck scripts in offline package-manager
+  mode and installed pytest verification. Policy version 6 invalidates older grants.
+- Companion setup, execution-boundary documentation and offline protocol checks.
+
+
 ## 0.3.0-rc.6 — Release hardening
 
 - Test-discovery paths obey exclusions, ignore rules and symlink restrictions,

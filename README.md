@@ -21,7 +21,7 @@ Its native runtime combines **deterministic policy**, **bounded decisions**, and
 Optional Jev integration selects among fully specified actions and can help decide
 which evidence stays in the active context. S1Code owns local tool execution.
 
-> **Source preview · 0.3.0-rc.6** — macOS and Linux. Built from source; no registry
+> **Source preview · 0.3.0-rc.7** — macOS and Linux. Built from source; no registry
 > package or hosted binary release yet. See [implementation status](docs/BUILD_STATUS.md)
 > for verified paths and remaining limits.
 
