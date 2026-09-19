@@ -53,8 +53,9 @@ The source live launcher can remember provider keys in macOS Keychain, service
 entered on macOS are saved there for reuse; `--no-keychain` opts out. Use
 `python3 scripts/try_live.py --forget-keys` to delete those records. No plaintext key
 file is created. Python and the selected provider child hold credentials in memory;
-macOS access controls apply to the interpreter. The standalone binary still uses
-environment credentials. Linux launcher input remains temporary.
+macOS access controls apply to the interpreter. The standalone binary reads these same records through the system security utility
+when an environment key is absent. It captures secrets privately, retains them in
+provider memory for requests/redaction, and does not export them to child environments. Linux launcher input remains temporary.
 
 Native Claude requests use the provider's documented five-minute ephemeral prompt
 cache for stable task/evidence prefixes. Cache retention is provider-side and

@@ -37,14 +37,14 @@ and no cost, speed or task-quality superiority claim is established.
   Delegations are not counted as native generation calls. Official Claude Code
   terminal handoff is separate; no subscription-token reuse is implemented.
 - macOS source launcher reuses provider keys from Keychain. Standalone Rust CLI
-  still reads environment credentials; Linux launcher input is temporary.
+  now also reads saved macOS Keychain credentials directly; Linux launcher input is temporary.
 - Offline demo with real patch/test execution, context mechanics probe, independent
   fixture checks, matched-policy evaluator, explicit live spend caps, private traces,
   source/history publication scan and third-party license inventory.
 
 ## Verification recorded locally
 
-- 51 offline Rust tests and 12 Python launcher/comparison tests passed. Coverage includes
+- 53 offline Rust tests and 12 Python launcher/comparison tests passed. Coverage includes
   fragmented streams, invalid decisions, retries, stale candidates, policy bypass,
   traversal/symlinks, concurrent edits, patch recovery, pinned overflow, exact
   rehydration, dependency closure, cancellation, restart, duplicate bridge requests,
@@ -128,3 +128,7 @@ for the Codex bridge. Revalidation, denies and cancellation stay enforced. The
 offline real-tool regression completes the parser task without approval prompts and
 checks persisted consent; denied/tampered/stale candidates still fail. No paid Snake
 trial has been started by the preparation or verification scripts.
+
+Native credential usability: direct CLI reads existing macOS Keychain entries for
+Claude, TypeSafe and OpenRouter, with explicit environment override and no child
+environment mutation. Credential lookup errors never include captured key output.

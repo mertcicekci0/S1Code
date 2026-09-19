@@ -17,3 +17,5 @@ pub mod tools;
 pub mod ui;
 
 pub mod evaluation;
+
+pub mod credentials;

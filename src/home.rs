@@ -110,7 +110,7 @@ impl Settings {
     }
 }
 fn key_present(name: &str) -> bool {
-    std::env::var(name).is_ok_and(|s| !s.trim().is_empty())
+    crate::credentials::present(name)
 }
 
 #[derive(Debug, PartialEq)]

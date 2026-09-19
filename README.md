@@ -86,7 +86,8 @@ approval (`RUN 8`) before any request. Approve the exact patch and test command 
 the UI. On macOS, missing keys are entered once with hidden input and remembered
 in Keychain; later runs reuse them. `--no-keychain` opts out. This demo uses native
 Claude Opus 5 and official TypeSafe Jev, with separate credentials and billing.
-The ordinary Rust CLI uses environment keys; it does not read Keychain directly.
+The ordinary Rust CLI also reads these saved macOS Keychain entries automatically.
+Explicit environment keys take precedence; no repeated export commands are needed.
 
 ## Native provider setup
 

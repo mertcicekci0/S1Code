@@ -60,7 +60,7 @@ pub struct Responses {
 impl Responses {
     pub fn from_env(model: &str) -> Result<Self> {
         Self::new(
-            std::env::var("OPENAI_API_KEY")
+            crate::credentials::get("OPENAI_API_KEY")
                 .context("OPENAI_API_KEY missing; native mode needs an API key")?,
             model,
             "https://api.openai.com/v1/responses",

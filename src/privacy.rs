@@ -15,7 +15,7 @@ impl Redactor {
         self.secrets.iter().any(|s| text.contains(s))
     }
     pub fn environment(workspace: &str) -> Self {
-        let secrets = std::env::vars()
+        let mut secrets: Vec<String> = std::env::vars()
             .filter(|(k, v)| {
                 v.len() >= 8
                     && (k.contains("KEY")
@@ -25,6 +25,7 @@ impl Redactor {
             })
             .map(|(_, v)| v)
             .collect();
+        secrets.extend(crate::credentials::loaded_secrets());
         let mut paths = vec![workspace.to_owned()];
         if let Ok(home) = std::env::var("HOME") {
             paths.push(home);
@@ -38,7 +39,11 @@ impl Redactor {
             .chars()
             .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
             .collect();
-        for secret in &self.secrets {
+        for secret in self
+            .secrets
+            .iter()
+            .chain(crate::credentials::loaded_secrets().iter())
+        {
             s = s.replace(secret, "[REDACTED]");
         }
         for path in &self.paths {

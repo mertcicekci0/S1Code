@@ -58,7 +58,7 @@ pub struct Claude {
 }
 impl Claude {
     pub fn from_env(model: &str) -> Result<Self> {
-        Self::new(std::env::var("ANTHROPIC_API_KEY").context(
+        Self::new(crate::credentials::get("ANTHROPIC_API_KEY").context(
             "ANTHROPIC_API_KEY missing; native Claude uses the public API, not Claude subscription credentials"
         )?, model, "https://api.anthropic.com/v1/messages")
     }

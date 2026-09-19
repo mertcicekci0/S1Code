@@ -6,7 +6,11 @@ compatibility. Doctor never prints keys.
 
 Run `s1code` for the interactive task-entry screen. `/login` connects the official
 Codex bridge to your ChatGPT account, `F2` changes provider, and `/help` shows setup.
-To use native Claude with Jev, first configure ANTHROPIC_API_KEY and the Jev key,
+On macOS, native Claude/Jev automatically reuse keys previously saved by the
+launcher in login Keychain. No export commands are required; macOS may request
+Keychain access. Explicit environment keys take precedence. Keys stay in provider
+memory and are not added to child-process environments. On other platforms,
+configure ANTHROPIC_API_KEY and the Jev key. To use native Claude with Jev,
 then enter `/provider claude` and `/jev openrouter`. Submit a task as normal text.
 After a task, `q` closes its activity view and returns home. New prompts create
 independent saved tasks; `/resume ID` reopens an existing one. `/claude-code` hands

@@ -244,9 +244,10 @@ Credential management for this source launcher:
 - macOS may ask permission for the Python interpreter to access saved records. This
   is system credential storage, not isolation from other authorized local programs.
 
-This convenience belongs to `scripts/try_live.py`. The standalone Rust binary still
-reads provider keys from its environment; the launcher supplies only the needed keys
-to its child. Keys are absent from command arguments and build/tool environments.
+The standalone Rust binary also reads these saved records automatically when an
+explicit environment key is absent. macOS may request Keychain access for the system
+security utility. The binary retains retrieved keys in memory, without adding them
+to child-process environments. The launcher supplies only needed keys to its child. Keys are absent from command arguments and build/tool environments.
 
 A native session's total budget can be explicitly updated with `s1code resume ID
 --max-provider-requests 16 --max-generations 12`. These are total session caps,

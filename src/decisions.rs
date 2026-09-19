@@ -240,7 +240,7 @@ impl Jev {
                 config.jev_state_limit,
             ),
             "openrouter" => Self::new_openrouter(
-                std::env::var("OPENROUTER_API_KEY").context(
+                crate::credentials::get("OPENROUTER_API_KEY").context(
                     "OPENROUTER_API_KEY missing; OpenRouter and TypeSafe keys are separate",
                 )?,
                 &config.jev_model,
@@ -256,7 +256,7 @@ impl Jev {
         }
     }
     pub fn from_env(model: &str, total: usize, state_limit: usize) -> Result<Self> {
-        let key = std::env::var("TYPESAFE_API_KEY").context("TYPESAFE_API_KEY missing; for OpenRouter use OPENROUTER_API_KEY and --jev-provider openrouter")?;
+        let key = crate::credentials::get("TYPESAFE_API_KEY").context("TYPESAFE_API_KEY missing; for OpenRouter use OPENROUTER_API_KEY and --jev-provider openrouter")?;
         ensure!(
             !key.starts_with("sk-or-"),
             "OpenRouter keys do not authenticate TypeSafe directly; use OPENROUTER_API_KEY and --jev-provider openrouter"
