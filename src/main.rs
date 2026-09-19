@@ -78,6 +78,8 @@ struct RunArgs {
 enum Commands {
     Run(RunArgs),
     Resume {
+        /// UUID, unique prefix, or latest task in the current workspace.
+        #[arg(default_value = "latest")]
         id: String,
         /// New native follow-up; retains prior evidence and cumulative request caps.
         #[arg(long, conflicts_with = "continue_task", conflicts_with = "approve")]
@@ -301,6 +303,7 @@ async fn execute(cmd: Commands, home: PathBuf) -> Result<()> {
             max_generations,
             max_steps,
         } => {
+            let id = s1code::session::resolve_session(&home, &id, &std::env::current_dir()?)?;
             let (store, mut s) = Store::resume(&home, &id)?;
             if let Some(cap) = max_steps {
                 ensure!(
@@ -424,19 +427,8 @@ async fn execute(cmd: Commands, home: PathBuf) -> Result<()> {
             );
         }
         Commands::Sessions => {
-            let path = home.join("sessions");
-            if path.exists() {
-                for entry in std::fs::read_dir(path)? {
-                    let p = entry?.path().join("checkpoint.json");
-                    if let Ok(bytes) = std::fs::read(p)
-                        && let Ok(s) = serde_json::from_slice::<Session>(&bytes)
-                    {
-                        println!(
-                            "{}",
-                            serde_json::json!({"id":s.id,"status":s.status,"mode":s.config.mode,"simulation":s.config.offline_demo})
-                        );
-                    }
-                }
+            for session in s1code::session::saved_sessions(&home)? {
+                println!("{}", serde_json::to_string(&session)?);
             }
         }
         Commands::Login { .. } => {
@@ -572,7 +564,13 @@ async fn interactive_home(home: PathBuf) -> Result<()> {
                 Commands::Run(home_run(task, &settings))
             }
             Command::Resume(id, continue_task) => Commands::Resume {
-                id,
+                id: match s1code::session::resolve_session(&home, &id, &settings.workspace) {
+                    Ok(id) => id,
+                    Err(error) => {
+                        messages.push(format!("S1Code: {error:#}"));
+                        continue;
+                    }
+                },
                 message: None,
                 continue_task,
                 approve: None,
@@ -644,27 +642,22 @@ async fn interactive_home(home: PathBuf) -> Result<()> {
 }
 
 fn session_rows(home: &std::path::Path) -> Vec<String> {
-    let mut rows = vec![];
-    if let Ok(entries) = std::fs::read_dir(home.join("sessions")) {
-        for entry in entries.flatten() {
-            let path = entry.path().join("checkpoint.json");
-            if let Ok(bytes) = std::fs::read(&path)
-                && let Ok(session) = serde_json::from_slice::<Session>(&bytes)
-            {
-                rows.push((
-                    path.metadata().and_then(|m| m.modified()).ok(),
-                    format!(
-                        "{} · {:?} · {}",
-                        session.id,
-                        session.status,
-                        s1code::tools::bound(&session.task, 120)
-                    ),
-                ));
-            }
-        }
+    match s1code::session::saved_sessions(home) {
+        Ok(sessions) => sessions
+            .into_iter()
+            .take(8)
+            .map(|s| {
+                format!(
+                    "{} · {:?} · {}\n  {}",
+                    s.id,
+                    s.status,
+                    s.workspace_name,
+                    s.task.replace('\n', " ")
+                )
+            })
+            .collect(),
+        Err(error) => vec![format!("Cannot list sessions: {error}")],
     }
-    rows.sort_by(|a, b| b.0.cmp(&a.0));
-    rows.into_iter().take(8).map(|(_, row)| row).collect()
 }
 
 async fn drive(

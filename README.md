@@ -50,7 +50,7 @@ returns to the conversation. In the follow-up field, `/help`, `/activity`,
 are hidden from the default conversation. Closing returns home; a new home prompt
 starts an independent saved task. Native tasks also accept follow-ups in the same conversation, retaining exact prior
 requests and captured evidence. Each submitted follow-up has a visible bounded
-request allowance; session usage stays cumulative. Use `/resume ID` for existing work.
+request allowance; session usage stays cumulative. Use `/resume` to reopen the latest task in this workspace, or `/resume ID` with a full ID or unique prefix. Saved native activity returns without replaying tools.
 `/eviction jev` enables Jev-assisted reversible eviction independently of action selection.
 
 `/claude-code` (or `s1code claude-code`) opens the installed, unmodified official

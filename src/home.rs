@@ -19,7 +19,7 @@ use std::{io, path::PathBuf};
 
 const ACCENT: Color = Color::Rgb(111, 211, 194);
 const MUTED: Color = Color::Rgb(151, 163, 177);
-pub const HELP: &str = "/provider codex|openai|claude  /model opus|sonnet|MODEL_ID  /effort LEVEL  /output-limit TOKENS  /decision rules|jev|generative\n/jev openrouter|typesafe  /eviction jev|conservative|off  /workspace PATH  /permissions manual|full-access  /login  /account  /sessions\n/resume ID  /continue ID (Codex)  /demo  /claude-code  /help  /exit\nNative keys: OPENAI_API_KEY or ANTHROPIC_API_KEY; Jev: OPENROUTER_API_KEY or TYPESAFE_API_KEY. Set keys in the environment, never in this prompt.";
+pub const HELP: &str = "/provider codex|openai|claude  /model opus|sonnet|MODEL_ID  /effort LEVEL  /output-limit TOKENS  /decision rules|jev|generative\n/jev openrouter|typesafe  /eviction jev|conservative|off  /workspace PATH  /permissions manual|full-access  /login  /account  /sessions\n/resume [latest|ID|PREFIX]  /continue ID (Codex)  /demo  /claude-code  /help  /exit\nNative keys: OPENAI_API_KEY or ANTHROPIC_API_KEY; Jev: OPENROUTER_API_KEY or TYPESAFE_API_KEY. Set keys in the environment, never in this prompt.";
 
 #[derive(Clone)]
 pub struct Settings {
@@ -321,7 +321,11 @@ pub fn interpret(line: &str, settings: &mut Settings) -> Result<Option<Command>>
         "/account" if args.is_empty() => return Ok(Some(Command::Account)),
         "/sessions" if args.is_empty() => return Ok(Some(Command::Sessions)),
         "/resume" | "/continue" => {
-            uuid::Uuid::parse_str(args).context("Use a session ID from /sessions")?;
+            let args = if args.is_empty() { "latest" } else { args };
+            ensure!(
+                crate::session::valid_session_selector(args),
+                "Use /resume latest or a session ID/prefix from /sessions"
+            );
             return Ok(Some(Command::Resume(args.into(), command == "/continue")));
         }
         "/demo" if args.is_empty() => return Ok(Some(Command::Demo)),
@@ -461,7 +465,7 @@ fn draw(f: &mut Frame, settings: &Settings, editor: &Editor, messages: &[String]
         rows[1],
     );
     let text = if messages.is_empty() {
-        "Describe a coding task below and press Enter.\n\nFor example: Fix the failing parser test and verify the change.\n\n/provider claude    Native Claude API; compatible with Jev\n/login             Sign in with ChatGPT through official Codex\n/demo              Offline demonstration with real file tools\n/help              All commands and authentication options\n\nEach prompt starts a saved task. Use /resume ID for existing work.\nExecution and patch approvals appear when needed.".into()
+        "Describe a coding task below and press Enter.\n\nFor example: Fix the failing parser test and verify the change.\n\n/provider claude    Native Claude API; compatible with Jev\n/login             Sign in with ChatGPT through official Codex\n/demo              Offline demonstration with real file tools\n/help              All commands and authentication options\n\nEach prompt starts a saved task. Use /resume for this workspace’s latest task, or /sessions to choose.\nExecution and patch approvals appear when needed.".into()
     } else {
         messages
             .iter()

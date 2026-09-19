@@ -192,6 +192,40 @@ async fn explicit_auto_approve_completes_real_tools_without_approval_prompts() {
     assert_eq!(automatic, 3);
     let (_, restored) = Store::resume(home.path(), &id).unwrap();
     assert!(restored.config.auto_approve);
+    let (store, session) = Store::resume(home.path(), &id).unwrap();
+    let before = session.metrics.tool_calls;
+    let (events, mut rx) = mpsc::unbounded_channel();
+    let (_input, inputs) = mpsc::unbounded_channel();
+    let resumed = Engine {
+        workspace: workspace_for(&session).unwrap(),
+        generator: Arc::new(demo::OfflineDemo {
+            workspace: workspace_for(&session).unwrap(),
+        }),
+        store,
+        session,
+        cancel: CancellationToken::new(),
+        events,
+        input: inputs,
+        interactive: true,
+        approved: None,
+    }
+    .run()
+    .await
+    .unwrap();
+    assert_eq!(resumed.metrics.tool_calls, before);
+    let history = rx.recv().await.unwrap();
+    assert_eq!(history.kind, "session_restored");
+    assert!(
+        history.data["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["kind"] == "completed")
+    );
+    while let Some(event) = rx.recv().await {
+        assert_ne!(event.kind, "tool_started");
+        assert_ne!(event.kind, "approval_required");
+    }
     let mut legacy = serde_json::to_value(RunConfig::default()).unwrap();
     legacy.as_object_mut().unwrap().remove("auto_approve");
     assert!(

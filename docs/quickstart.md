@@ -20,7 +20,7 @@ After a native task, type a follow-up in the same screen. Prior requests and evi
 remain available, while the next task needs fresh verification. Sending a follow-up
 authorizes the displayed additional request allowance (at most 24) and a bounded
 step allowance; counters remain cumulative. Esc or `/exit` returns home. New home
-prompts create independent saved tasks; `/resume ID` reopens an existing one. `/claude-code` hands
+prompts create independent saved tasks; `/resume` reopens the most recent task in this workspace. `/resume ID` also accepts a unique prefix of at least eight characters. `/claude-code` hands
 the terminal to the official Claude Code application and does not use Jev.
 
 Start with `s1code demo --offline --workspace /tmp/s1code-demo-1`. The parser fixture
@@ -50,15 +50,19 @@ start with `--auto-approve` (alias `--full-access`) to preauthorize supported
 patches/tests. This setting persists on resume; policy denies and stale-action
 checks remain enforced. It does not enable arbitrary shell commands.
 
-`s1code sessions` lists IDs/statuses. `s1code resume ID` loads the recorded working
-set and validates current files. A cancelled process or incomplete patch is treated
+`s1code sessions` lists task previews, workspace names and statuses, newest first.
+`s1code resume` selects the latest saved task in the current workspace;
+`s1code resume ID` also accepts a unique ID prefix. It restores recent conversation
+and tool history, loads the recorded working set and validates current files.
+Restoring the display never reruns old tools or reuses their approvals. A cancelled process or incomplete patch is treated
 as uncertain. Inspect the trace and workspace first, then use
 `s1code recover ID` for a retained patch journal and
 `s1code resume ID --acknowledge-interruption` to explicitly clear uncertain intent.
 Recovery refuses to overwrite subsequent user edits.
 
-The default task screen shows conversation, not protocol events. `F2` toggles the
-inspector. In a Codex conversation, type a follow-up and press Enter after a response;
+The default task screen shows conversation, not protocol events. `Ctrl+O` (or `F2`) toggles the
+inspector; Esc returns to the conversation. `/help`, `/activity`, `/decisions`,
+`/context` and `/diff` in the follow-up field are local commands. In a Codex conversation, type a follow-up and press Enter after a response;
 Esc closes it without submitting another turn. Interactive resume waits for input.
 Native conversations also accept follow-ups; a headless run ends after one task.
 

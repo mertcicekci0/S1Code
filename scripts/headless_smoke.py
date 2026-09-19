@@ -15,6 +15,7 @@ with tempfile.TemporaryDirectory(prefix="s1code-headless-") as directory:
         result = subprocess.run(
             [str(binary), "--home", str(home), *map(str, args)],
             capture_output=True, text=True, timeout=30, check=True,
+            cwd=workspace if workspace.is_dir() else base,
         )
         return [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
 
@@ -29,7 +30,7 @@ with tempfile.TemporaryDirectory(prefix="s1code-headless-") as directory:
         assert approvals < 3, "unexpected additional action"
         approvals += 1
         previous_simulated = state["metrics"]["simulated_turns"]
-        events += command("resume", state["id"], "--headless", "--approve", state["pending"]["id"],
+        events += command("resume", state["id"][:8], "--headless", "--approve", state["pending"]["id"],
                           "--max-provider-requests", "32", "--max-generations", "16")
         updated = json.loads(checkpoint.read_text())
         assert updated["config"]["max_provider_requests"] == 32
@@ -41,6 +42,11 @@ with tempfile.TemporaryDirectory(prefix="s1code-headless-") as directory:
     assert state["metrics"]["generative_calls"] == 0
     assert any(e["kind"] == "tool_result" and e["data"].get("exit_code") == 1 for e in events)
     assert "int(text.strip())" in (workspace / "parser.py").read_text()
+    restored = command("resume", "--headless")
+    assert not any(e["kind"] == "tool_started" for e in restored)
+    assert next(e["data"] for e in restored if e["kind"] == "summary")["metrics"]["tool_calls"] == state["metrics"]["tool_calls"]
+    listing = command("sessions")
+    assert listing[0]["id"] == state["id"] and listing[0]["task"]
     exported = base / "export.jsonl"
     command("export", state["id"], exported)
     text = exported.read_text()

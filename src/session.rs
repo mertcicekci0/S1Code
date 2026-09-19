@@ -69,6 +69,117 @@ pub fn select_home(current: PathBuf, legacy: PathBuf) -> PathBuf {
     }
 }
 
+#[derive(Debug, serde::Serialize)]
+pub struct SavedSession {
+    pub id: String,
+    pub task: String,
+    pub status: RunStatus,
+    pub mode: Mode,
+    pub simulation: bool,
+    pub workspace_name: String,
+    pub updated_unix_ms: Option<u128>,
+    #[serde(skip)]
+    pub workspace: PathBuf,
+}
+
+/// Read-only index. A corrupt checkpoint cannot hide other recoverable sessions.
+pub fn saved_sessions(home: &Path) -> Result<Vec<SavedSession>> {
+    let dir = home.join("sessions");
+    let entries = match fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
+        Err(error) => return Err(error).context("cannot list saved sessions"),
+    };
+    let mut sessions = vec![];
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let checkpoint = entry.path().join("checkpoint.json");
+        let Ok(metadata) = fs::symlink_metadata(&checkpoint) else {
+            continue;
+        };
+        if !metadata.is_file() || metadata.len() > 32 * 1024 * 1024 {
+            continue;
+        }
+        let Ok(bytes) = fs::read(&checkpoint) else {
+            continue;
+        };
+        let Ok(s) = serde_json::from_slice::<Session>(&bytes) else {
+            continue;
+        };
+        if s.version != brand::STORAGE_VERSION
+            || uuid::Uuid::parse_str(&s.id).is_err()
+            || entry.file_name().to_str() != Some(&s.id)
+        {
+            continue;
+        }
+        let redactor = Redactor::environment(&s.workspace);
+        let workspace = PathBuf::from(&s.workspace);
+        sessions.push(SavedSession {
+            id: s.id,
+            task: redactor.text(&s.task).chars().take(160).collect(),
+            status: s.status,
+            mode: s.config.mode,
+            simulation: s.config.offline_demo,
+            workspace_name: redactor
+                .text(&workspace.file_name().unwrap_or_default().to_string_lossy()),
+            workspace,
+            updated_unix_ms: metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|time| time.as_millis()),
+        });
+    }
+    sessions.sort_by(|a, b| {
+        b.updated_unix_ms
+            .cmp(&a.updated_unix_ms)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    Ok(sessions)
+}
+
+pub fn valid_session_selector(selector: &str) -> bool {
+    selector == "latest"
+        || (8..=36).contains(&selector.len())
+            && selector.bytes().all(|c| c.is_ascii_hexdigit() || c == b'-')
+}
+
+/// `latest` is always scoped to the current workspace; prefixes must be unique.
+pub fn resolve_session(home: &Path, selector: &str, workspace: &Path) -> Result<String> {
+    ensure!(
+        valid_session_selector(selector),
+        "Use latest, a session UUID, or a unique prefix of at least 8 characters"
+    );
+    if uuid::Uuid::parse_str(selector).is_ok() {
+        return Ok(selector.to_lowercase());
+    }
+    let sessions = saved_sessions(home)?;
+    if selector == "latest" {
+        let workspace = workspace
+            .canonicalize()
+            .context("current workspace unavailable")?;
+        return sessions.into_iter().find(|s| s.workspace == workspace).map(|s| s.id)
+            .context("No saved session in this workspace. Use s1code sessions or /sessions to find an existing task.");
+    }
+    let prefix = selector.to_lowercase();
+    let matches: Vec<_> = sessions
+        .into_iter()
+        .filter(|s| s.id.starts_with(&prefix))
+        .collect();
+    ensure!(
+        matches.len() <= 1,
+        "Ambiguous session prefix; use more characters or the full ID"
+    );
+    matches
+        .into_iter()
+        .next()
+        .map(|s| s.id)
+        .context("No saved session matches this prefix")
+}
+
 pub struct Store {
     pub dir: PathBuf,
     _lock: File,
@@ -193,7 +304,16 @@ impl Store {
             s.version
         );
         let store = Self::open(home, id, Path::new(&s.workspace))?;
-        s = serde_json::from_slice(&fs::read(&path)?)?;
+        let locked: Session = serde_json::from_slice(&fs::read(&path)?)?;
+        ensure!(
+            locked.id == id && locked.version == brand::STORAGE_VERSION,
+            "session checkpoint identity or version mismatch"
+        );
+        ensure!(
+            locked.workspace == s.workspace,
+            "session workspace changed while acquiring its lock; retry resume"
+        );
+        s = locked;
         // The journal may be ahead of the checkpoint. Do not replay unknown effects.
         let events = store.events()?;
         if events.last().is_some_and(|e| e.seq > s.event_seq) || s.inflight.is_some() {
@@ -302,6 +422,83 @@ impl Store {
 #[cfg(test)]
 mod lock_tests {
     use super::*;
+
+    #[test]
+    fn session_lookup_scopes_latest_and_refuses_ambiguous_prefixes() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let (store, mut s) = Store::create(
+            home.path(),
+            first.path(),
+            "first task".into(),
+            Default::default(),
+        )
+        .unwrap();
+        let first_id = s.id.clone();
+        drop(store);
+        let (store, other) = Store::create(
+            home.path(),
+            second.path(),
+            "other task".into(),
+            Default::default(),
+        )
+        .unwrap();
+        drop(store);
+        assert_eq!(
+            resolve_session(home.path(), "latest", first.path()).unwrap(),
+            first_id
+        );
+        assert_eq!(
+            resolve_session(home.path(), "latest", second.path()).unwrap(),
+            other.id
+        );
+        assert_eq!(
+            resolve_session(home.path(), &first_id[..8], second.path()).unwrap(),
+            first_id
+        );
+        assert!(resolve_session(home.path(), "../../private", first.path()).is_err());
+        let empty = tempfile::tempdir().unwrap();
+        assert!(resolve_session(home.path(), "latest", empty.path()).is_err());
+        for suffix in ['a', 'b'] {
+            s.id = format!("abcdefab-0000-4000-8000-00000000000{suffix}");
+            let dir = home.path().join("sessions").join(&s.id);
+            fs::create_dir(&dir).unwrap();
+            atomic_write(
+                &dir.join("checkpoint.json"),
+                &serde_json::to_vec(&s).unwrap(),
+            )
+            .unwrap();
+        }
+        assert!(
+            resolve_session(home.path(), "abcdefab", first.path())
+                .unwrap_err()
+                .to_string()
+                .contains("Ambiguous")
+        );
+        fs::write(
+            home.path()
+                .join("sessions")
+                .join(&first_id)
+                .join("checkpoint.json"),
+            b"partial",
+        )
+        .unwrap();
+        assert_eq!(saved_sessions(home.path()).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn resume_refuses_mismatched_checkpoint_identity() {
+        let root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let (store, mut s) =
+            Store::create(home.path(), root.path(), "task".into(), Default::default()).unwrap();
+        let id = s.id.clone();
+        s.id = uuid::Uuid::new_v4().to_string();
+        store.save(&s).unwrap();
+        drop(store);
+        assert!(Store::resume(home.path(), &id).is_err());
+    }
 
     #[test]
     fn dropping_store_releases_lock_with_a_duplicate_descriptor_alive() {

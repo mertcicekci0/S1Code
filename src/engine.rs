@@ -24,6 +24,24 @@ impl Engine {
         Ok(())
     }
     pub async fn run(mut self) -> Result<Session> {
+        if self.interactive && self.session.event_seq > 0 {
+            let mut history: Vec<_> = self
+                .store
+                .events()?
+                .into_iter()
+                .filter(|e| !matches!(e.kind.as_str(), "stream" | "input_ready"))
+                .rev()
+                .take(300)
+                .collect();
+            history.reverse();
+            // Presentation only: never journal old events or replay their actions.
+            let _ = self.events.send(RunEvent {
+                seq: self.session.event_seq,
+                session: self.session.id.clone(),
+                kind: "session_restored".into(),
+                data: json!({"events":history}),
+            });
+        }
         let turn_requests = self.session.config.max_provider_requests.min(24);
         let turn_generations = self.session.config.max_generations.min(turn_requests);
         let turn_steps = self.session.config.max_steps.min(40);

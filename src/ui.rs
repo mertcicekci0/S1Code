@@ -418,6 +418,26 @@ impl Screen {
     fn receive(&mut self, e: RunEvent) {
         let v = &e.data;
         match e.kind.as_str() {
+            "session_restored" => {
+                if let Some(events) = v["events"].as_array() {
+                    for event in events.iter().take(300) {
+                        if let Ok(past) = serde_json::from_value::<RunEvent>(event.clone())
+                            && past.kind != "session_restored"
+                        {
+                            self.receive(past);
+                        }
+                    }
+                }
+                self.pending = None;
+                self.awaiting_input = false;
+                self.stream.clear();
+                self.status = "Resuming".into();
+                self.message(
+                    "Session",
+                    "Restored recent saved activity. No tool was rerun by restoring this view.",
+                );
+                return;
+            }
             "started" | "delegation_started" => {
                 self.task = string(v, "task").into();
                 let task = string(v, "task");
@@ -955,6 +975,26 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n")
     }
+    #[test]
+    fn restored_history_cannot_reactivate_old_approvals() {
+        let mut screen = Screen::default();
+        screen.receive(event("session_restored", serde_json::json!({"events":[
+            event("started", serde_json::json!({"task":"Fix input parsing"})),
+            event("approval_required", serde_json::json!({"candidate":{"id":"old-action","action":{"type":"run","argv":["node","--test"]}}})),
+            event("completed", serde_json::json!({"summary":"Fixed parsing with test coverage."}))
+        ]})));
+        assert!(screen.pending.is_none());
+        assert!(!screen.awaiting_input);
+        assert!(screen.answer_approval(true).is_none());
+        assert!(
+            screen
+                .conversation
+                .iter()
+                .any(|line| line.contains("Fixed parsing with test coverage."))
+        );
+        assert_eq!(screen.entries.len(), 3);
+    }
+
     #[test]
     fn completion_summary_and_local_commands_stay_in_the_conversation() {
         let mut screen = Screen::default();

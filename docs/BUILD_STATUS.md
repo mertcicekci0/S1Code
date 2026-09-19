@@ -6,6 +6,12 @@ and no cost, speed or task-quality superiority claim is established.
 
 ## Implemented
 
+- Workspace-scoped `resume` defaults to the latest saved task; unique ID prefixes
+  and task previews make existing sessions findable. Native interactive resume
+  restores recent activity for inspection without replaying tools or approvals.
+  Checkpoint identity is revalidated after taking the workspace lock. Library,
+  native integration and headless approval/resume tests pass locally.
+
 - Task conversations display the final completion explanation and process exit
   results. Ctrl+O opens the inspector without function keys; Esc returns to chat.
   Follow-up `/help`, `/activity`, `/decisions`, `/context` and `/diff` are local
