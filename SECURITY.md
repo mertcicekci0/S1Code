@@ -66,3 +66,8 @@ observed file hash and exactly one matching snippet, constructs the full patch a
 then runs ordinary validation/approval. No fuzzy replacement or model-computed hash
 can bypass those checks. Saved interactive preferences exclude execution consent,
 credentials and workspace paths.
+
+Native project checks include approved pytest and existing npm test/build/lint/
+typecheck scripts. npm offline mode prevents its package fetching, not networking
+inside scripts. Lifecycle scripts and test plugins run trusted repository code;
+user-level configuration may be read. See [supported checks](docs/project-checks.md).

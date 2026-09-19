@@ -144,9 +144,20 @@ impl Workspace {
     pub fn validate_command(&self, argv: &[String]) -> Result<()> {
         ensure!(
             crate::policy::valid_command(argv),
-            "unsupported command; use node --test, python3 -m unittest [-v|-q], python3 -m unittest discover [-s DIRECTORY] [-v|-q], or cargo test/check --offline [--locked] [--all-targets|--lib] [--quiet]; shell strings and additional flags are unsupported"
+            "unsupported command; use npm --offline run test|build|lint|typecheck, python3 -m pytest [-q|-v|--disable-warnings], node --test, python3 -m unittest [-v|-q], python3 -m unittest discover [-s DIRECTORY] [-v|-q], or cargo test/check --offline [--locked] [--all-targets|--lib] [--quiet]; shell strings and additional flags are unsupported"
         );
-        // The command grammar currently has one path argument: unittest -s.
+        if argv.first().is_some_and(|arg| arg == "npm") {
+            let bytes = self.bytes("package.json")?;
+            let package: serde_json::Value = serde_json::from_slice(&bytes)
+                .context("package.json must be valid JSON before executing a script")?;
+            ensure!(
+                package["scripts"][&argv[3]]
+                    .as_str()
+                    .is_some_and(|script| !script.trim().is_empty()),
+                "Requested script is missing or empty in package.json; inspect scripts before selecting a check"
+            );
+        }
+        // The command grammar has one path argument: unittest -s.
         if let Some(at) = argv.iter().position(|arg| arg == "-s") {
             let relative = &argv[at + 1]; // Proven present by the command grammar.
             let path = self.path(relative, true)?;
@@ -657,9 +668,18 @@ pub fn empty_test_run(argv: &[String], output: &str) -> bool {
                     let (count, rest) = rest.split_once(' ')?;
                     (rest.starts_with("tests in ") || rest.starts_with("test in ")).then_some(count)
                 }
-                ["node", "--test"] => line
+                ["node", "--test"] | ["npm", "--offline", "run", "test"] => line
                     .strip_prefix("# tests ")
                     .or_else(|| line.strip_prefix("ℹ tests ")),
+                ["python3", "-m", "pytest", ..]
+                    if line.contains("no tests ran") || line.contains("collected 0 items") =>
+                {
+                    Some("0")
+                }
+                ["python3", "-m", "pytest", ..] => {
+                    let line = line.trim_matches('=').trim();
+                    line.split_once(" passed").map(|(count, _)| count)
+                }
                 ["cargo", "test", ..] => line
                     .strip_prefix("test result: ok. ")?
                     .split_once(" passed;")

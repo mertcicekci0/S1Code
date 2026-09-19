@@ -28,7 +28,8 @@ which evidence stays in the active context. S1Code owns local tool execution.
 ## What you can do
 
 - **Work in a real repository.** Search and read source, apply validated patches,
-  inspect Git changes, and run supported verification commands.
+  inspect Git changes, and run [supported verification commands](docs/project-checks.md)
+  for Node, Python, Cargo and existing npm scripts.
 - **Keep the conversation readable.** Streaming replies and tool outcomes up front;
   candidates, decisions, context and diffs in an optional inspector.
 - **Control execution.** Review exact patches and commands, or preapprove supported

@@ -26,6 +26,12 @@ pub fn valid_command(argv: &[String]) -> bool {
         }
         ["python3", "-m", "unittest", rest @ ..] => valid_unittest(rest),
         ["node", "--test"] => true,
+        ["python3", "-m", "pytest", rest @ ..] => rest
+            .iter()
+            .all(|arg| ["-q", "-v", "--disable-warnings"].contains(arg)),
+        ["npm", "--offline", "run", script] => {
+            ["test", "build", "lint", "typecheck"].contains(script)
+        }
         _ => false,
     }
 }
@@ -154,6 +160,32 @@ mod tests {
             vec![
                 "python3", "-m", "unittest", "discover", "-s", "tests", "-s", "other",
             ],
+        ] {
+            assert!(!valid_command(
+                &argv.into_iter().map(String::from).collect::<Vec<_>>()
+            ));
+        }
+    }
+    #[test]
+    fn project_checks_do_not_allow_installation_or_arbitrary_scripts() {
+        for argv in [
+            vec!["npm", "--offline", "run", "test"],
+            vec!["npm", "--offline", "run", "build"],
+            vec!["python3", "-m", "pytest", "-q"],
+        ] {
+            let action = Action::Run {
+                argv: argv.into_iter().map(String::from).collect(),
+                verification: true,
+            };
+            assert_eq!(classify(&action), PolicyClass::Ask);
+        }
+        for argv in [
+            vec!["npm", "install"],
+            vec!["npm", "run", "test"],
+            vec!["npm", "--offline", "run", "deploy"],
+            vec!["npm", "--offline", "run", "test", "--", "--update"],
+            vec!["python3", "-m", "pytest", "--override-ini", "secret"],
+            vec!["python3", "-m", "pytest", "../outside"],
         ] {
             assert!(!valid_command(
                 &argv.into_iter().map(String::from).collect::<Vec<_>>()

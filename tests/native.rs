@@ -1115,3 +1115,74 @@ async fn greeting_then_answer_keeps_conversation_without_claiming_verified_compl
     assert_eq!(result.metrics.simulated_turns, 1);
     assert_eq!(result.prior_user_requests, ["hi"]);
 }
+
+#[tokio::test]
+async fn npm_checks_require_an_existing_allowed_manifest_script() {
+    let root = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let workspace = Workspace::new(root.path(), vec![]).unwrap();
+    let argv = ["npm", "--offline", "run", "test"]
+        .map(String::from)
+        .to_vec();
+    assert!(workspace.validate_command(&argv).is_err());
+    fs::write(
+        root.path().join("package.json"),
+        r#"{"scripts":{"build":"node build.js"}}"#,
+    )
+    .unwrap();
+    assert!(workspace.validate_command(&argv).is_err());
+    fs::write(
+        root.path().join("package.json"),
+        r#"{"scripts":{"test":"node --test"}}"#,
+    )
+    .unwrap();
+    fs::write(root.path().join("core.test.js"), "const {test}=require('node:test'); const assert=require('node:assert/strict'); test('addition',()=>assert.equal(2+2,4));").unwrap();
+    assert!(workspace.validate_command(&argv).is_ok());
+    let excluded = Workspace::new(root.path(), vec!["package.json".into()]).unwrap();
+    assert!(excluded.validate_command(&argv).is_err());
+    // Exercise the actual project-script runner where npm is installed.
+    if std::process::Command::new("npm")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        let (store, _) = Store::create(
+            home.path(),
+            root.path(),
+            "check".into(),
+            RunConfig::default(),
+        )
+        .unwrap();
+        let result = workspace
+            .execute(
+                &Action::Run {
+                    argv: argv.clone(),
+                    verification: true,
+                },
+                &store,
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.exit_code, Some(0));
+        assert!(!s1code::tools::empty_test_run(&argv, &result.text));
+        assert!(result.text.contains("addition"));
+    }
+    fs::write(root.path().join("package.json"), "invalid").unwrap();
+    assert!(workspace.validate_command(&argv).is_err());
+}
+
+#[test]
+fn additional_test_runners_reject_recognized_empty_runs() {
+    let npm = ["npm", "--offline", "run", "test"].map(String::from);
+    assert!(s1code::tools::empty_test_run(&npm, "# tests 0\n# fail 0"));
+    let pytest = ["python3", "-m", "pytest", "-q"].map(String::from);
+    assert!(s1code::tools::empty_test_run(
+        &pytest,
+        "no tests ran in 0.01s"
+    ));
+    assert!(!s1code::tools::empty_test_run(
+        &pytest,
+        "==== 3 passed in 0.01s ===="
+    ));
+}

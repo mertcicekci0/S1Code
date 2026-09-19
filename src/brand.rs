@@ -7,4 +7,4 @@ pub const LEGACY_BIN: &str = "nerve";
 // All v1 executables must contend on the same workspace lock, across renames.
 pub const WORKSPACE_LOCK_NAMESPACE: &str = "nerve";
 pub const STORAGE_VERSION: u32 = 1;
-pub const POLICY_VERSION: &str = "policy-5";
+pub const POLICY_VERSION: &str = "policy-6";
