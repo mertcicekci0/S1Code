@@ -177,6 +177,7 @@ performance**. Live trials are explicit and budgeted. Results remain private;
 no benchmark wins, prices, or speed claims are made. See
 [evaluation methodology](docs/evaluation.md), [demo](docs/demo.md),
 [Jev decision showcase](docs/jev-showcase.md),
+[Opus 5 decision stress demo](docs/decision-stress-demo.md),
 [architecture](docs/architecture.md), [security](SECURITY.md), and
 [privacy](PRIVACY.md).
 

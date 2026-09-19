@@ -7,6 +7,9 @@ To inspect a real bounded choice with candidate-specific evidence, use the
 [Jev decision showcase](jev-showcase.md). It prepares matched local workspaces and
 makes no provider call itself.
 
+For a harder same-model comparison against official Claude Code, use the
+[Opus 5 decision stress demo](decision-stress-demo.md).
+
 ## Normal task entry
 
 Run `./target/release/s1code` to open the real task-entry screen. This is not a

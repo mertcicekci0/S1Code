@@ -1,0 +1,6 @@
+Fix the production `record_payment` behavior. Duplicate transaction IDs must be
+idempotent even when a retry carries a different amount, customer totals must stay
+independent, and a rejected nonpositive amount must not reserve its transaction ID.
+Trace the implementation actually imported by checkout, do not edit archives,
+examples, migrations, documentation, or tests, make the smallest correct change,
+then run `python3 -m unittest discover -s tests -v` and report the real result.

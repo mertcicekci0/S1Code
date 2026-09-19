@@ -15,6 +15,9 @@ and no cost, speed or task-quality superiority claim is established.
   decision state. The terminal inspector shows the selected action and its evidence;
   a matched misleading-result fixture exercises the ambiguity without forcing Jev
   into deterministic steps.
+- A harder same-model demo prepares byte-identical Claude Code and S1Code trees with
+  seven plausible payment-code locations. The decision frontier stays capped and
+  retains an explicit generator escape route.
 - Streaming OpenAI Responses and Anthropic Messages adapters, strict structured
   action validation, cancellation and provider-native usage. Claude defaults to
   Opus 5; model IDs are configurable. No silent provider switch.

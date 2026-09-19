@@ -519,7 +519,10 @@ impl Engine {
             && matches!(last.action, Action::Search { .. })
         {
             let bytes = self.store.get(&last.artifact.hash)?;
-            for line in String::from_utf8_lossy(&bytes).lines().take(4) {
+            // Keep the ambiguity bounded while allowing a useful frontier in
+            // repositories with several historical or generated definitions.
+            // The eighth slot remains the ask-generator escape route.
+            for line in String::from_utf8_lossy(&bytes).lines().take(7) {
                 let mut fields = line.splitn(3, ':');
                 if let (Some(path), Some(number), Some(matched)) =
                     (fields.next(), fields.next(), fields.next())
