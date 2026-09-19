@@ -77,3 +77,31 @@ separately; OpenAI input tokens include its cached subset. Unknown fields remain
 null. Do not compare/sum these fields without normalizing their semantics.
 The official Claude Code terminal handoff is outside this evaluator; its turns,
 usage, approvals and success are not recorded as native S1Code measurements.
+
+## Offline context mechanics probe
+
+```sh
+cargo run --locked --release --example context_probe
+```
+
+This creates real content-addressed artifacts, compacts 16/64/256-entry working
+sets five times each, verifies exact rehydration, and emits JSON with serialized
+byte counts and raw local wall-time samples. Repeated trials share filesystem
+caches; fixture setup is excluded. Tokens and cost are null; provider calls are
+zero. The previous-layout payload is the calculated size of repeatedly sending all
+eligible excerpts, not a measured competing implementation or a service benchmark.
+The probe cannot establish coding quality, billable-token savings or faster tasks.
+
+`native_context_pressure_live` is an ignored integration test for authorized live
+validation. It requires `S1CODE_LIVE_BUDGET_REQUESTS` (capped at 16), selected native
+provider keys and an empty private `S1CODE_LIVE_OUTPUT`. It performs real bounded
+reads to populate historical evidence, asks real Jev retention questions, runs
+the native coding loop, permits only parser.py patches and exact fixture unittest
+commands, verifies unchanged tests, and rehydrates from storage after reopening the
+session. No scripted model answers. Compile before loading keys; run only that test
+binary with `--ignored --exact native_context_pressure_live`. Keep all outputs private.
+
+The 0.3.0-rc.1 Claude request layout and prompt contract are versioned with source.
+Cache writes and reads remain separate usage fields and must both be included in
+any cost analysis. Compare policies at the same source commit and model; do not
+attribute simultaneous caching and eviction changes solely to Jev.

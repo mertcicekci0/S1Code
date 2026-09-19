@@ -55,3 +55,8 @@ entered on macOS are saved there for reuse; `--no-keychain` opts out. Use
 file is created. Python and the selected provider child hold credentials in memory;
 macOS access controls apply to the interpreter. The standalone binary still uses
 environment credentials. Linux launcher input remains temporary.
+
+Native Claude requests use the provider's documented five-minute ephemeral prompt
+cache for stable task/evidence prefixes. Cache retention is provider-side and
+separate from local artifacts and session deletion. Cache writes/reads are recorded
+when returned. This is not a zero-retention promise.

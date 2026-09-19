@@ -30,14 +30,15 @@ pub fn protected(items: &[ContextItem]) -> BTreeSet<String> {
     pinned
 }
 
+fn placeholder(hash: &str) -> String {
+    format!("[EVICTED: rehydrate {hash} to retrieve exact captured bytes without reexecution]")
+}
+
 pub fn render(s: &Session, store: &Store) -> Result<Value> {
     let mut evidence = vec![];
     for item in &s.context {
         let content = if item.evicted {
-            format!(
-                "[EVICTED: rehydrate {} to retrieve exact captured bytes without reexecution]",
-                item.artifact.hash
-            )
+            placeholder(&item.artifact.hash)
         } else {
             String::from_utf8(store.get(&item.artifact.hash)?)?
         };
@@ -58,10 +59,15 @@ pub fn eligible(s: &Session) -> Vec<usize> {
         .collect()
 }
 
-pub fn excerpts(s: &Session, store: &Store) -> Result<Value> {
+/// Only include evidence being scored in this batch. All batches use the same
+/// session snapshot; decisions are applied only after every response validates.
+pub fn excerpts(s: &Session, store: &Store, indices: &[usize]) -> Result<Value> {
     let mut out = vec![];
-    for i in eligible(s) {
-        let c = &s.context[i];
+    for &i in indices {
+        let c = s
+            .context
+            .get(i)
+            .ok_or_else(|| anyhow::anyhow!("invalid evidence index"))?;
         let bytes = store.get(&c.artifact.hash)?;
         let text = String::from_utf8(bytes)?;
         let diagnostics = text
@@ -72,7 +78,7 @@ pub fn excerpts(s: &Session, store: &Store) -> Result<Value> {
             .take(8)
             .collect::<Vec<_>>()
             .join("\n");
-        out.push(json!({"artifact":c.artifact.hash,"action":c.action,"excerpt":bound(&text,900),"diagnostic_lines":bound(&diagnostics,900)}));
+        out.push(json!({"artifact":c.artifact.hash,"capture_revision":c.artifact.revision,"dependencies":c.artifact.dependencies,"action":c.action,"excerpt":bound(&text,900),"diagnostic_lines":bound(&diagnostics,900)}));
     }
     Ok(json!({"task":s.task,"current_workspace_revision":s.current_revision,"eligible":out}))
 }
@@ -84,11 +90,28 @@ pub fn compact(
     preferred: Option<&BTreeSet<String>>,
 ) -> Result<Vec<String>> {
     let max = s.config.context_bytes;
-    if render(s, store)?.to_string().len() <= max * 85 / 100 {
+    // Read/hash-check each active artifact once. JSON string sizes account for
+    // escaping and UTF-8 exactly; eviction changes only these content strings.
+    let rendered = render(s, store)?;
+    let mut size = rendered.to_string().len();
+    if size <= max * 85 / 100 {
         return Ok(vec![]);
     }
-    let mut dropped = vec![];
+    let savings: Vec<i64> = s
+        .context
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            rendered["evidence"][i]["content"].to_string().len() as i64
+                - json!(placeholder(&c.artifact.hash)).to_string().len() as i64
+        })
+        .collect();
+    let pinned = protected(&s.context);
+    let mut dropped = BTreeSet::new();
     for i in eligible(s) {
+        if dropped.contains(&s.context[i].artifact.hash) {
+            continue;
+        }
         if preferred.is_some_and(|ids| !ids.contains(&s.context[i].artifact.hash)) {
             continue;
         }
@@ -117,23 +140,44 @@ pub fn compact(
         if preferred.is_some_and(|ids| group.iter().any(|id| !ids.contains(id))) {
             continue;
         }
-        for c in s
-            .context
-            .iter_mut()
-            .filter(|c| !c.evicted && group.contains(&c.artifact.hash))
-        {
-            c.evicted = true;
-            dropped.push(c.artifact.hash.clone());
+        if group.iter().any(|id| pinned.contains(id)) {
+            continue;
         }
-        if render(s, store)?.to_string().len() <= max * 65 / 100 {
+        let saving: i64 = s
+            .context
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| {
+                !c.evicted
+                    && group.contains(&c.artifact.hash)
+                    && !dropped.contains(&c.artifact.hash)
+            })
+            .map(|(i, _)| savings[i])
+            .sum();
+        // Replacing small evidence with a long placeholder must not grow context.
+        if saving <= 0 {
+            continue;
+        }
+        size -= saving as usize;
+        dropped.extend(group);
+        if size <= max * 65 / 100 {
             break;
         }
     }
     ensure!(
-        render(s, store)?.to_string().len() <= max,
+        size <= max,
         "context budget exceeded: pinned or retained evidence cannot fit; narrow task or increase --context-bytes"
     );
-    Ok(dropped)
+    // Commit the working-set change only when the whole plan fits. An overflow
+    // leaves the prior working set intact, including all pinned constraints.
+    let mut result = vec![];
+    for c in &mut s.context {
+        if !c.evicted && dropped.contains(&c.artifact.hash) {
+            c.evicted = true;
+            result.push(c.artifact.hash.clone());
+        }
+    }
+    Ok(result)
 }
 
 pub fn rehydrate(s: &mut Session, id: &str, store: &Store) -> Result<Vec<u8>> {

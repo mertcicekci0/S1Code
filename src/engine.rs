@@ -441,7 +441,9 @@ impl Engine {
             .filter(|c| c.class != PolicyClass::Deny)
             .collect();
         let first = admissible
-            .first()
+            .iter()
+            .find(|c| !matches!(c.action, Action::AskGenerator))
+            .or_else(|| admissible.first())
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("no admissible candidate"))?;
         let ambiguous = admissible
@@ -565,12 +567,12 @@ impl Engine {
         let mut preferred = None;
         let mut source = self.session.config.eviction.clone();
         if source == "jev" {
-            let state = context::excerpts(&self.session, &self.store)?;
             let mut drop_ids = std::collections::BTreeSet::new();
             let eligible = context::eligible(&self.session);
             let mut failed = None;
             // Independent retention questions share one snapshot; bound each batch.
             for batch in eligible.chunks(8) {
+                let state = context::excerpts(&self.session, &self.store, batch)?;
                 let questions=batch.iter().map(|i|{let id=self.session.context[*i].artifact.hash.clone();(id.clone(),Question::Noul{instructions:format!("Does the full evidence artifact {id}, shown with actual excerpt and diagnostic lines in the state, need to stay active for the current task? Yes means retain. No means it can be evicted and retrieved exactly later.")})}).collect();
                 self.event(
                     "decision_requested",
@@ -579,12 +581,7 @@ impl Engine {
                 match jev
                     .as_mut()
                     .ok_or_else(|| anyhow::anyhow!("Jev unavailable"))?
-                    .ask(
-                        state.clone(),
-                        questions,
-                        &self.cancel,
-                        &mut self.session.metrics,
-                    )
+                    .ask(state, questions, &self.cancel, &mut self.session.metrics)
                     .await
                 {
                     Ok(response) => {
@@ -691,6 +688,54 @@ fn safe_evidence_action(candidate: &CandidateAction) -> bool {
 #[cfg(test)]
 mod selection_tests {
     use super::*;
+    #[tokio::test]
+    async fn sole_concrete_action_avoids_generation_escape_and_decision_request() {
+        let root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let (store, session) = Store::create(
+            home.path(),
+            root.path(),
+            "inspect".into(),
+            RunConfig {
+                decision: "jev".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let (events, _rx) = mpsc::unbounded_channel();
+        let (_tx, input) = mpsc::unbounded_channel();
+        let mut engine = Engine {
+            workspace: workspace_for(&session).unwrap(),
+            generator: Arc::new(crate::demo::OfflineDemo {
+                workspace: workspace_for(&session).unwrap(),
+            }),
+            store,
+            session,
+            cancel: CancellationToken::new(),
+            events,
+            input,
+            interactive: false,
+            approved: None,
+        };
+        let read = policy::candidate(
+            Action::Read {
+                path: "parser.py".into(),
+                start: 1,
+                lines: 40,
+            },
+            "rev",
+            "fixture",
+            vec![],
+        );
+        let escape = policy::candidate(Action::AskGenerator, "rev", "fixture", vec![]);
+        let selected = engine
+            .select(vec![escape, read.clone()], &mut None)
+            .await
+            .unwrap();
+        assert_eq!(selected.id, read.id);
+        assert_eq!(engine.session.metrics.decision_requests, 0);
+        assert_eq!(engine.session.metrics.generative_calls, 0);
+    }
     #[test]
     fn uncertain_patch_can_gather_untried_evidence_without_replanning() {
         let patch = policy::candidate(

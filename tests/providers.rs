@@ -397,6 +397,10 @@ async fn claude_stream_contract_usage_and_hidden_content() {
         serde_json::from_str(requests[0].split_once("\r\n\r\n").unwrap().1).unwrap();
     assert_eq!(body["output_config"]["format"]["type"], "json_schema");
     assert_eq!(body["stream"], true);
+    assert_eq!(
+        body["messages"][0]["content"][0]["cache_control"]["type"],
+        "ephemeral"
+    );
     assert!(body.get("tools").is_none());
     assert!(
         !body["output_config"]["format"]["schema"]

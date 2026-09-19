@@ -12,6 +12,44 @@ use tokio_util::sync::CancellationToken;
 
 pub const DEFAULT_MODEL: &str = "claude-opus-5";
 
+/// Stable task/evidence prefixes precede changing workspace and verification
+/// metadata. Capture revisions remain attached to every historical snapshot.
+fn content_blocks(input: Value) -> Vec<Value> {
+    let Value::Object(mut fields) = input else {
+        return vec![json!({"type":"text","text":input.to_string()})];
+    };
+    let mut blocks = vec![];
+    let mut stable = serde_json::Map::new();
+    for key in ["task", "constraints"] {
+        if let Some(value) = fields.remove(key) {
+            stable.insert(key.into(), value);
+        }
+    }
+    if !stable.is_empty() {
+        blocks.push(json!({"type":"text","text":Value::Object(stable).to_string()}));
+    }
+    if fields.get("evidence").is_some_and(Value::is_array) {
+        let evidence = fields.remove("evidence").unwrap();
+        let mut freshness = vec![];
+        for (index, mut item) in evidence.as_array().unwrap().iter().cloned().enumerate() {
+            if let Some(object) = item.as_object_mut()
+                && let Some(historical) = object.remove("historical")
+            {
+                freshness.push(json!({"evidence_index":index,"historical":historical}));
+            }
+            blocks.push(json!({"type":"text","text":json!({"evidence":[item]}).to_string()}));
+        }
+        fields.insert("evidence_freshness".into(), json!(freshness));
+    }
+    // One explicit five-minute breakpoint; mutable state is outside the cached
+    // prefix. Provider usage is authoritative: a marker does not imply a hit.
+    if let Some(last) = blocks.last_mut() {
+        last["cache_control"] = json!({"type":"ephemeral"});
+    }
+    blocks.push(json!({"type":"text","text":Value::Object(fields).to_string()}));
+    blocks
+}
+
 pub struct Claude {
     client: reqwest::Client,
     key: String,
@@ -314,7 +352,7 @@ impl Generator for Claude {
         deltas: mpsc::UnboundedSender<String>,
     ) -> Result<GenerationResult> {
         ensure!(!cancel.is_cancelled(), "generation cancelled");
-        let body = json!({"model":self.model,"system":format!("{INSTRUCTIONS} Wire format: each action has type plus named payloads read/search/patch/run/rehydrate/blocked/finish. Put arguments inside the payload matching type; all other payloads must be null. Example: type=read with read={{path:relative/path,start:1,lines:100}}. Keep explanations in the top-level message, never in another payload. Never substitute an argument-free action for a read, search, patch or run."),"messages":[{"role":"user","content":input.to_string()}],"stream":true,"max_tokens":8192,"output_config":{"format":{"type":"json_schema","schema":schema()}}});
+        let body = json!({"model":self.model,"system":format!("{INSTRUCTIONS} Wire format: each action has type plus named payloads read/search/patch/run/rehydrate/blocked/finish. Put arguments inside the payload matching type; all other payloads must be null. Example: type=read with read={{path:relative/path,start:1,lines:100}}. Keep explanations in the top-level message, never in another payload. Never substitute an argument-free action for a read, search, patch or run."),"messages":[{"role":"user","content":content_blocks(input)}],"stream":true,"max_tokens":8192,"output_config":{"format":{"type":"json_schema","schema":schema()}}});
         let response = tokio::select! {biased; _=cancel.cancelled()=>bail!("generation cancelled"), r=self.client.post(&self.endpoint).header("x-api-key", &self.key).header("anthropic-version", "2023-06-01").json(&body).send()=>r.context("Claude transport failed")?};
         if !response.status().is_success() {
             let status = response.status();
@@ -388,6 +426,44 @@ fn http_error(status: u16, body: &[u8], key: &str) -> String {
 #[cfg(test)]
 mod error_tests {
     use super::*;
+    #[test]
+    fn growing_evidence_keeps_cacheable_prefix_and_all_dynamic_fields() {
+        let original = json!({"task":"fix parser","constraints":"never run without approval",
+            "current_workspace_revision":"old", "verification":null,
+            "evidence":[{"artifact":{"hash":"a","revision":"old"},"content":"exact\nbytes", "historical":false}],
+            "candidates":[{"id":"choice-a"}], "selection_contract":"choose one"});
+        let first = content_blocks(original.clone());
+        let mut changed = original;
+        changed["current_workspace_revision"] = json!("new");
+        changed["verification"] = json!({"exit_code":0});
+        changed["evidence"][0]["historical"] = json!(true);
+        changed["evidence"].as_array_mut().unwrap().push(json!({"artifact":{"hash":"b","revision":"new"},"content":"more evidence","historical":false}));
+        let next = content_blocks(changed);
+        assert_eq!(first[0]["text"], next[0]["text"]);
+        assert_eq!(first[1]["text"], next[1]["text"]);
+        assert_eq!(next[2]["cache_control"]["type"], "ephemeral");
+        assert!(next.last().unwrap().get("cache_control").is_none());
+        assert_eq!(
+            next.iter()
+                .filter(|b| b.get("cache_control").is_some())
+                .count(),
+            1
+        );
+        let tail: Value =
+            serde_json::from_str(next.last().unwrap()["text"].as_str().unwrap()).unwrap();
+        assert_eq!(tail["current_workspace_revision"], "new");
+        assert_eq!(tail["verification"]["exit_code"], 0);
+        assert_eq!(tail["evidence_freshness"][0]["historical"], true);
+        assert_eq!(tail["candidates"][0]["id"], "choice-a");
+        assert_eq!(tail["selection_contract"], "choose one");
+        let saved: Value = serde_json::from_str(next[1]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(saved["evidence"][0]["content"], "exact\nbytes");
+        assert_eq!(saved["evidence"][0]["artifact"]["revision"], "old");
+        let mut evicted: Value = saved;
+        evicted["evidence"][0]["content"] = json!("[EVICTED]");
+        assert_ne!(content_blocks(evicted)[0]["text"], next[1]["text"]);
+    }
+
     #[test]
     fn named_payload_actions_recover_exact_arguments_and_reject_cross_type_fields() {
         let wire = schema();

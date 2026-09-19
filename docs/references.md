@@ -72,3 +72,11 @@ spend limits. Only bounded, redacted selected fields are displayed; no raw heade
 POST /v1/systemone Bearer-auth endpoint. No implementation code reused. The supplied
 TypeSafe dashboard screenshot labels its masked apikey_ value as Secret key; prefix
 validation is now provider-specific and does not reject TypeSafe secrets as Anthropic IDs.
+
+2026-09-19 context follow-up: re-inspected fast-jev-compaction at the same pinned
+commit, specifically state fitting, question batches, call/result removal and hook
+fallback in the files above. Its scripted Swift presentation is not live evidence.
+Read the official [Claude prompt-caching contract](https://platform.claude.com/docs/en/build-with-claude/prompt-caching):
+explicit content-block breakpoints, five-minute lifetime, prefix invalidation,
+minimum cacheable lengths and separate cache-read/cache-write usage. Native prefix
+packing and transactional artifact eviction were independently authored (ADR 006).

@@ -1,7 +1,7 @@
 # S1Code
 
 A Rust terminal coding agent with concrete candidate actions, deterministic policy,
-and recoverable context. **Experimental v0, built from source.** S1Code is a working
+and recoverable context. **Experimental 0.3.0-rc.1, built from source.** S1Code is a working
 name; naming availability and trademark clearance have not been established.
 
 Native mode owns the coding loop. A generation provider proposes plans and complete
@@ -21,12 +21,15 @@ The pinned toolchain is Rust 1.94.0. Windows is unsupported. Linux CI is configu
 but has not been observed running in this build session.
 
 ```sh
+git clone https://github.com/mertcicekci0/S1Code.git
+cd S1Code
 cargo build --locked --release
 cargo install --path . --locked
 s1code doctor
 ```
 
-There is no published package or downloadable release advertised here.
+This is a source preview, not a published Cargo package or a stable release.
+See [release notes](CHANGELOG.md) and [current limitations](docs/BUILD_STATUS.md).
 
 ## Start the interactive app
 
@@ -70,6 +73,21 @@ s1code resume <session-id>
 
 The context demo performs real reads, eviction, and exact rehydration with no model.
 
+## Try native Claude + official Jev
+
+From the source checkout:
+
+```sh
+python3 scripts/try_live.py task
+```
+
+This creates a disposable parser repo, uses real APIs, and asks for a bounded spend
+approval (`RUN 8`) before any request. Approve the exact patch and test command in
+the UI. On macOS, missing keys are entered once with hidden input and remembered
+in Keychain; later runs reuse them. `--no-keychain` opts out. This demo uses native
+Claude Opus 5 and official TypeSafe Jev, with separate credentials and billing.
+The ordinary Rust CLI uses environment keys; it does not read Keychain directly.
+
 ## Native provider setup
 
 For OpenAI, set `OPENAI_API_KEY` in your environment using your normal secret-management
@@ -101,7 +119,7 @@ For native Claude, set `ANTHROPIC_API_KEY`, then:
 ```sh
 s1code run "fix the failing parser test" --provider claude
 s1code run "fix the failing parser test" --provider claude \
-  --decision jev --jev-provider openrouter
+  --decision jev --jev-provider typesafe
 ```
 
 The Claude adapter uses the public streaming Messages API with structured proposals.
@@ -124,12 +142,26 @@ uses the official CLI's credentials; S1Code never reads token files. Consult
 [provider setup and mode boundaries](docs/providers.md) for compatibility and the
 bridge's different approval/resume behavior.
 
+## Recoverable context
+
+The working set compacts at 85% of its byte budget toward 65%. Pinned instructions,
+diagnostics and dependency groups stay intact; discarded working-set entries remain
+as exact artifacts. `--eviction jev` scores focused excerpts; the default
+`conservative` policy requires no decision API. `--eviction off` is available for
+controlled comparisons. A pinned overflow stops explicitly.
+
+Claude requests place stable evidence before changing metadata and enable a
+five-minute prompt-cache breakpoint. Actual cache reads/writes are recorded;
+cache hits and lower bills are not guaranteed. No service performance claim is made.
+
 ## Validate and evaluate
 
 ```sh
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test --locked
+cargo run --locked --release --example context_probe
+python3 scripts/release_check.py
 s1code eval --suite fixtures/core
 s1code eval --suite fixtures/heldout --output eval-results/heldout
 ```

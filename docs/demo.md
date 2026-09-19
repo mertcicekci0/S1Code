@@ -39,7 +39,9 @@ Adding `--decision jev` requires a separate TypeSafe key, or use
 `--decision jev --jev-provider openrouter` with `OPENROUTER_API_KEY`.
 Native generation still needs `OPENAI_API_KEY`. Provider calls may involve
 planning, search formulation and debugging, not just patch generation. All count.
-Live inference was not recorded during the build because keys were unavailable.
+Provider-restricted live diagnostics remain private. Do not publish Jev traces or
+service measurements without documented clearance; a passing contract check alone
+does not establish successful coding.
 
 ## Managed ChatGPT path
 

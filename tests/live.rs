@@ -128,3 +128,182 @@ async fn claude_live_contract() -> anyhow::Result<()> {
     // No generated actions execute. Outputs remain in memory and are not published.
     Ok(())
 }
+
+/// Real generation and retention under pressure. The controller approves only
+/// parser.py patches and the fixture's exact unittest commands. Never publishes
+/// provider responses or measurements; inspect the private output locally.
+#[tokio::test]
+#[ignore = "billed Claude/Jev coding task; requires explicit request budget and S1CODE_LIVE_OUTPUT private directory"]
+async fn native_context_pressure_live() -> anyhow::Result<()> {
+    use anyhow::ensure;
+    use s1code::{
+        context, demo,
+        domain::*,
+        engine::{Engine, workspace_for},
+        generation, policy,
+        session::{Store, atomic_write, private_dir},
+    };
+    let budget: u64 = std::env::var("S1CODE_LIVE_BUDGET_REQUESTS")?.parse()?;
+    ensure!(budget > 0, "explicit positive spend consent required");
+    let output = std::path::PathBuf::from(std::env::var("S1CODE_LIVE_OUTPUT")?);
+    ensure!(
+        !output.exists() || output.read_dir()?.next().is_none(),
+        "private live output must be empty"
+    );
+    private_dir(&output)?;
+    atomic_write(&output.join(".gitignore"), b"*\n")?;
+    // Keep the workspace outside the private trace tree: its catch-all ignore
+    // rule is intentionally respected by native repository discovery.
+    let root = tempfile::Builder::new()
+        .prefix("s1code-live-workspace-")
+        .tempdir()?
+        .keep();
+    demo::fixture(&root)?;
+    let init = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&root)
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .status()?;
+    ensure!(init.success(), "fixture git initialization failed");
+    let original_tests = std::fs::read(root.join("test_parser.py"))?;
+    let mut names = vec![];
+    for i in 0..10 {
+        let name = format!("old-build-{i}.txt");
+        std::fs::write(root.join(&name), (0..100).map(|n| format!("Historical unrelated build {i} entry {n}: documentation index regenerated successfully.\n")).collect::<String>())?;
+        names.push(name);
+    }
+    names.extend(["parser.py".into(), "test_parser.py".into()]);
+    let (store, mut session) = Store::create(
+        &output.join("data"),
+        &root,
+        format!(
+            "{} Old build logs are unrelated historical evidence; only edit parser.py and leave tests unchanged.",
+            demo::TASK
+        ),
+        RunConfig {
+            generation_provider: "claude".into(),
+            generation_model: s1code::claude::DEFAULT_MODEL.into(),
+            decision: "jev".into(),
+            eviction: "jev".into(),
+            max_provider_requests: budget.min(16),
+            max_generations: 8,
+            context_bytes: 32_000,
+            ..Default::default()
+        },
+    )?;
+    let workspace = workspace_for(&session)?;
+    session.current_revision = workspace.revision()?;
+    let cancel = CancellationToken::new();
+    // Populate pressure using actual bounded reads, not synthetic model answers.
+    for name in names {
+        let action = Action::Read {
+            path: name,
+            start: 1,
+            lines: 100,
+        };
+        let candidate = policy::candidate(
+            action.clone(),
+            &session.current_revision,
+            "live fixture read",
+            vec![],
+        );
+        let result = workspace.execute(&action, &store, &cancel).await?;
+        let artifact = store.put(
+            result.text.as_bytes(),
+            "native_read",
+            &candidate.id,
+            &session.current_revision,
+            vec![],
+        )?;
+        session.context.push(ContextItem {
+            artifact: artifact.clone(),
+            action,
+            pinned: false,
+            evicted: false,
+            diagnostic: false,
+        });
+        session.metrics.tool_calls += 1;
+        store.record(
+            &mut session,
+            "tool_result",
+            json!({"call_id":candidate.id,"artifact":artifact,"content":result.text}),
+        )?;
+    }
+    let generator = generation::from_config(&session.config)?;
+    let (events, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, input) = tokio::sync::mpsc::unbounded_channel();
+    let engine = Engine {
+        workspace,
+        store,
+        session,
+        generator,
+        cancel,
+        events,
+        input,
+        interactive: true,
+        approved: None,
+    };
+    let task = tokio::spawn(engine.run());
+    while let Some(event) = rx.recv().await {
+        if event.kind == "approval_required" {
+            let candidate: CandidateAction =
+                serde_json::from_value(event.data["candidate"].clone())?;
+            let allowed = match candidate.action {
+                Action::Patch { edits } => {
+                    !edits.is_empty() && edits.iter().all(|e| e.path == "parser.py")
+                }
+                Action::Run {
+                    argv,
+                    verification: true,
+                } => [
+                    vec!["python3", "-m", "unittest"],
+                    vec!["python3", "-m", "unittest", "-v"],
+                    vec!["python3", "-m", "unittest", "discover", "-v"],
+                ]
+                .iter()
+                .any(|a| *a == argv),
+                _ => false,
+            };
+            tx.send(if allowed {
+                UiInput::Approve(candidate.id)
+            } else {
+                UiInput::Deny(candidate.id)
+            })?;
+        }
+    }
+    let completed = task.await??;
+    ensure!(
+        completed.status == RunStatus::Completed,
+        "native live task did not complete; inspect private journal"
+    );
+    ensure!(completed.verified.is_some(), "missing verification");
+    ensure!(
+        std::fs::read(root.join("test_parser.py"))? == original_tests,
+        "fixture tests changed"
+    );
+    let (store, mut session) = Store::resume(&output.join("data"), &completed.id)?;
+    let id = session
+        .context
+        .iter()
+        .find(|c| c.evicted)
+        .map(|c| c.artifact.hash.clone())
+        .ok_or_else(|| anyhow::anyhow!("live run did not evict evidence"))?;
+    let expected = store.get(&id)?;
+    ensure!(
+        context::rehydrate(&mut session, &id, &store)? == expected,
+        "rehydration mismatch"
+    );
+    store.record(
+        &mut session,
+        "rehydrated",
+        json!({"artifact":id,"rerun":false,"source":"live fixture verification"}),
+    )?;
+    atomic_write(
+        &output.join("result.json"),
+        &serde_json::to_vec(
+            &json!({"coding_completed":true,"exact_rehydration":true,"metrics":session.metrics}),
+        )?,
+    )?;
+    Ok(())
+}
