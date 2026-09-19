@@ -65,6 +65,11 @@ Local macOS ARM64 validation of rc.6 passed:
 - License inventory for 234 host dependencies and an advisory scan with zero findings.
   Generated notice files remain under target/notices for binary redistribution.
 
+Hosted macOS/Linux checks and the dependency-audit job passed for source commit
+`e792ac9` ([run](https://github.com/mertcicekci0/S1Code/actions/runs/35437791111)).
+The subsequent CI-only maintenance pins the checkout action to a reviewed release
+commit, disables persisted checkout credentials and pins the Ubuntu runner label.
+
 The source/history scan has no pattern findings. This is not proof that arbitrary
 sensitive content is absent. The dated dependency audit is documented separately
 in [dependency-audit.md](dependency-audit.md).

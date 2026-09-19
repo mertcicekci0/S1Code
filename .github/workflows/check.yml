@@ -9,23 +9,26 @@ jobs:
   check:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-24.04, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.94.0
         with:
           components: rustfmt, clippy
       - run: scripts/check.sh
       - run: cargo run --locked -- eval --suite fixtures/core
   dependency-audit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.94.0
       - run: cargo install cargo-audit --locked --version 0.22.2
       - run: scripts/audit.sh
