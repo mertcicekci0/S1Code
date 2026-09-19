@@ -50,8 +50,12 @@ Cost, speed and task-quality advantages have not been established.
   with explicit execution consent; scripts and plugins remain trusted code.
 - Offline demos with real tools, context-pressure probe, protected fixture checks,
   matched-policy evaluation tooling and source/history publication scanning.
-- Reproducible source archives from clean commits, checksums and license inventory.
-  CI runs source checks on macOS/Linux and a separate dependency advisory check.
+- One discovery pass per text search, with per-file path checks and fresh discovery
+  for each action. Streaming workspace hashing bounds actual bytes read.
+- Reproducible source archives, binary archives with notices/build identity, checksum
+  validation and atomic executable replacement in the user-selected prefix.
+- CI source checks on macOS/Linux, a separate advisory check and a manually triggered
+  binary workflow that tests installed artifacts before preparing a prerelease draft.
 
 ## Verification
 
@@ -60,7 +64,10 @@ all-target clippy, six headless/PTY/credential/MCP smoke scripts, release build,
 advisory audit reported no findings. actionlint 1.7.12 accepted both workflows
 (shellcheck and pyflakes integrations disabled). Binary release preparation adds
 two native target builds, installed-archive smoke checks and checksum/manifest
-validation. Hosted rc.8 results and publication are pending at this commit.
+validation. Local macOS archive installation, version check and full offline
+patch/approval/resume smoke also passed. Check the exact commit on the
+[Actions page](https://github.com/mertcicekci0/S1Code/actions) for hosted results;
+a successful workflow creates a draft, not a public release.
 
 
 Baseline macOS ARM64 validation before the rc.8 changes passed:
