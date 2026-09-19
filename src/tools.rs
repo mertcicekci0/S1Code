@@ -82,7 +82,12 @@ impl Workspace {
         for c in path.components() {
             at.push(c);
             match fs::symlink_metadata(&at) {
-                Ok(m) => ensure!(!m.file_type().is_symlink(), "symlinks are unsupported"),
+                Ok(m) => {
+                    ensure!(!m.file_type().is_symlink(), "symlinks are unsupported");
+                    if at != self.root.join(path) {
+                        ensure!(m.is_dir(), "path parent is not a directory");
+                    }
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound && new => {}
                 Err(e) => return Err(e.into()),
             }
@@ -94,9 +99,8 @@ impl Workspace {
                 "ignored or unsupported file"
             );
         } else {
-            // Query ignore matching through the same walker after checking parent.
-            let parent = at.parent().context("no parent")?;
-            ensure!(parent.is_dir(), "new files require an existing directory");
+            // Missing parents are created only after the complete patch is
+            // validated and approved. Every existing ancestor was checked above.
             ensure!(!self.ignored(relative)?, "new file matches ignore rules");
         }
         Ok(at)
@@ -244,6 +248,14 @@ impl Workspace {
         let mut names = BTreeSet::new();
         let mut out = vec![];
         for edit in edits {
+            let name = edit.path.to_lowercase();
+            ensure!(
+                !names.iter().any(
+                    |existing: &String| name.starts_with(&format!("{existing}/"))
+                        || existing.starts_with(&format!("{name}/"))
+                ),
+                "patch paths conflict as file and parent directory"
+            );
             ensure!(
                 names.insert(edit.path.to_lowercase()),
                 "duplicate/case-alias patch path"
@@ -313,9 +325,38 @@ impl Workspace {
             });
         }
         let journal = store.dir.join("patch-recovery.json");
-        atomic_write(&journal, &serde_json::to_vec(&recovery)?)?;
+        let mut created_dirs = vec![];
+        atomic_write(
+            &journal,
+            &serde_json::to_vec(
+                &serde_json::json!({"files":recovery,"created_dirs":created_dirs}),
+            )?,
+        )?;
+        for edit in edits {
+            let relative = Path::new(&edit.path);
+            let mut parent = PathBuf::new();
+            for component in relative.parent().context("patch parent")?.components() {
+                parent.push(component);
+                let relative_parent = parent.to_str().context("non UTF-8 parent")?;
+                let at = self.path(relative_parent, true)?;
+                if !at.exists() {
+                    if let Err(error) = fs::create_dir(&at) {
+                        let rollback = self.recover(store);
+                        bail!("patch directory creation failed: {error}; rollback: {rollback:?}");
+                    }
+                    created_dirs.push(relative_parent.to_owned());
+                    atomic_write(
+                        &journal,
+                        &serde_json::to_vec(
+                            &serde_json::json!({"files":recovery,"created_dirs":created_dirs}),
+                        )?,
+                    )?;
+                }
+            }
+        }
         for (edit, (path, old)) in edits.iter().zip(&original) {
             // Recheck immediately before each file replacement. This is not multi-file atomicity.
+            self.path(&edit.path, edit.before_hash.is_none())?;
             let current = fs::read(path).ok();
             if current != *old {
                 bail!(
@@ -336,8 +377,22 @@ impl Workspace {
     }
     pub fn recover(&self, store: &Store) -> Result<()> {
         let journal = store.dir.join("patch-recovery.json");
-        let recovery: Vec<RecoveryFile> =
+        let recovery: PatchJournal =
             serde_json::from_slice(&fs::read(&journal).context("no patch recovery journal")?)?;
+        let (recovery, created_dirs) = match recovery {
+            PatchJournal::Legacy(files) => (files, vec![]),
+            PatchJournal::Directories {
+                files,
+                created_dirs,
+            } => (files, created_dirs),
+        };
+        for dir in &created_dirs {
+            let path = self.path(dir, true)?;
+            ensure!(
+                !path.exists() || path.is_dir(),
+                "recovery directory was replaced by a file; preserve manual changes"
+            );
+        }
         // Validate all current hashes before any recovery mutation; preserve unrelated edits.
         for r in &recovery {
             let p = self.path(&r.path, true)?;
@@ -359,6 +414,18 @@ impl Workspace {
                 }
             } else if p.exists() {
                 fs::remove_file(p)?;
+            }
+        }
+        for dir in created_dirs.iter().rev() {
+            let path = self.path(dir, true)?;
+            match fs::remove_dir(path) {
+                Ok(()) => {}
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
+                    ) => {}
+                Err(e) => return Err(e.into()),
             }
         }
         fs::remove_file(journal)?;
@@ -519,6 +586,16 @@ impl Workspace {
             diagnostic,
         })
     }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum PatchJournal {
+    Legacy(Vec<RecoveryFile>),
+    Directories {
+        files: Vec<RecoveryFile>,
+        created_dirs: Vec<String>,
+    },
 }
 
 #[derive(Serialize, Deserialize)]

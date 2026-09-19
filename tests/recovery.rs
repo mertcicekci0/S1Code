@@ -454,3 +454,76 @@ fn renamed_brand_preserves_existing_store_without_merging() {
         "openai"
     );
 }
+
+#[test]
+fn nested_patches_validate_first_and_recover_created_directories_safely() {
+    let root = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let (store, _) = Store::create(
+        home.path(),
+        root.path(),
+        "nested".into(),
+        Default::default(),
+    )
+    .unwrap();
+    let workspace = Workspace::new(root.path(), vec![]).unwrap();
+    let edit = Edit {
+        path: "src/game/main.js".into(),
+        before_hash: None,
+        content: "export const value = 1;\n".into(),
+    };
+    assert!(
+        workspace
+            .diff(std::slice::from_ref(&edit))
+            .unwrap()
+            .contains("src/game/main.js")
+    );
+    assert!(!root.path().join("src").exists());
+    let bad = Edit {
+        path: "src".into(),
+        before_hash: None,
+        content: "conflict".into(),
+    };
+    assert!(workspace.apply(&[edit.clone(), bad], &store, "r").is_err());
+    assert!(!root.path().join("src").exists());
+    workspace
+        .apply(std::slice::from_ref(&edit), &store, "r")
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(root.path().join(&edit.path)).unwrap(),
+        edit.content
+    );
+    assert!(!store.dir.join("patch-recovery.json").exists());
+    fs::write(root.path().join("src/user.txt"), "keep me").unwrap();
+    fs::write(store.dir.join("patch-recovery.json"),serde_json::to_vec(&json!({"files":[{"path":edit.path,"before":null,"after":hash(edit.content.as_bytes())}],"created_dirs":["src","src/game"]})).unwrap()).unwrap();
+    workspace.recover(&store).unwrap();
+    assert!(!root.path().join("src/game").exists());
+    assert_eq!(
+        fs::read_to_string(root.path().join("src/user.txt")).unwrap(),
+        "keep me"
+    );
+    fs::write(root.path().join(".gitignore"), "ignored/\n").unwrap();
+    assert!(
+        workspace
+            .validate_edits(&[Edit {
+                path: "ignored/sub/new.txt".into(),
+                before_hash: None,
+                content: "blocked".into()
+            }])
+            .is_err()
+    );
+    #[cfg(unix)]
+    {
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.path().join("linked")).unwrap();
+        assert!(
+            workspace
+                .validate_edits(&[Edit {
+                    path: "linked/sub/new.txt".into(),
+                    before_hash: None,
+                    content: "blocked".into()
+                }])
+                .is_err()
+        );
+    }
+}
