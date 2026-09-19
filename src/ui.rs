@@ -86,6 +86,7 @@ fn action_text(a: &Value) -> String {
             },
             command(a)
         ),
+        "replace" => format!("Replace exact snippet in {}", string(a, "path")),
         "patch" => format!(
             "Apply patch\n{}",
             a["edits"]

@@ -54,6 +54,13 @@ pub enum Action {
     Patch {
         edits: Vec<Edit>,
     },
+    /// Materialized into a hash-bound patch before candidate selection.
+    Replace {
+        path: String,
+        before_hash: String,
+        old: String,
+        new: String,
+    },
     Run {
         argv: Vec<String>,
         verification: bool,

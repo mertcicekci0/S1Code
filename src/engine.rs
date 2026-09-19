@@ -428,6 +428,27 @@ impl Engine {
             .into_iter()
             .take(8)
             .map(|a| {
+                let a = if let Action::Replace {
+                    path,
+                    before_hash,
+                    old,
+                    new,
+                } = &a
+                {
+                    match self.workspace.replacement(path, before_hash, old, new) {
+                        Ok(patch) => patch,
+                        Err(error) => {
+                            return policy::candidate(
+                                a,
+                                revision,
+                                &format!("deterministic input rejection: {error}"),
+                                evidence.clone(),
+                            );
+                        }
+                    }
+                } else {
+                    a
+                };
                 let validation = match &a {
                     Action::Read { path, start, lines } => {
                         self.workspace.path(path, false).and_then(|_| {

@@ -3,6 +3,7 @@ use anyhow::{Result, ensure};
 
 pub fn classify(action: &Action) -> PolicyClass {
     match action {
+        Action::Replace { .. } => PolicyClass::Deny, // Must first become a validated exact patch.
         Action::Run { argv, .. } if !valid_command(argv) => PolicyClass::Deny,
         Action::Run { .. } | Action::Patch { .. } => PolicyClass::Ask,
         _ => PolicyClass::Allow,

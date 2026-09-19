@@ -47,6 +47,51 @@ impl Default for Settings {
     }
 }
 impl Settings {
+    pub fn load(home: &std::path::Path) -> Result<Self> {
+        let path = home.join("preferences-v1.json");
+        if !path.exists() {
+            return Ok(Self::default());
+        }
+        let bytes = std::fs::read(&path).context("Cannot read preferences-v1.json")?;
+        ensure!(bytes.len() <= 8192, "preferences file too large");
+        let saved: serde_json::Value = serde_json::from_slice(&bytes)
+            .context("Invalid preferences-v1.json; move it aside to reset preferences")?;
+        ensure!(saved["version"] == 1, "unsupported preferences version");
+        let mut settings = Self::default();
+        for (key, command) in [
+            ("provider", "/provider"),
+            ("model", "/model"),
+            ("effort", "/effort"),
+            ("decision", "/decision"),
+            ("jev_provider", "/jev"),
+        ] {
+            if key != "provider" && settings.provider == "codex" && key != "model" {
+                continue;
+            }
+            if let Some(value) = saved[key].as_str() {
+                // Jev endpoint preference must not silently turn a rules policy into Jev.
+                let old_decision = settings.decision.clone();
+                interpret(&format!("{command} {value}"), &mut settings)?;
+                if key == "jev_provider" {
+                    settings.decision = old_decision;
+                }
+            }
+        }
+        if let Some(value) = saved["max_output_tokens"].as_u64() {
+            interpret(&format!("/output-limit {value}"), &mut settings)?;
+        }
+        Ok(settings)
+    }
+    pub fn save(&self, home: &std::path::Path) -> Result<()> {
+        crate::session::private_dir(home)?;
+        // Credentials, current directory and automatic consent are deliberately absent.
+        crate::session::atomic_write(
+            &home.join("preferences-v1.json"),
+            &serde_json::to_vec_pretty(
+                &serde_json::json!({"version":1,"provider":self.provider,"model":self.model,"decision":self.decision,"jev_provider":self.jev_provider,"effort":self.effort,"max_output_tokens":self.max_output_tokens}),
+            )?,
+        )
+    }
     pub fn ownership(&self) -> String {
         if self.provider == "codex" {
             "ChatGPT account · Codex owns execution · Jev not active".into()
@@ -84,6 +129,8 @@ impl Settings {
         }
         .into();
         self.model = None;
+        self.effort = None;
+        self.auto_approve = false;
     }
     fn readiness(&self) -> String {
         if self.provider == "codex" {
@@ -159,7 +206,11 @@ pub fn interpret(line: &str, settings: &mut Settings) -> Result<Option<Command>>
         }
         "/model" => {
             ensure!(
-                !args.is_empty() && args.len() <= 200 && !args.contains(char::is_whitespace),
+                !args.is_empty()
+                    && args.len() <= 200
+                    && !args.contains(char::is_whitespace)
+                    && !args.starts_with("sk-")
+                    && !args.starts_with("apikey_"),
                 "Use /model MODEL_ID"
             );
             settings.model = Some(args.into());
@@ -263,6 +314,40 @@ impl Editor {
             self.cursor += 1;
         }
     }
+    fn layout(&self, width: usize) -> (Vec<String>, usize, usize) {
+        let width = width.max(1);
+        let mut lines = vec![String::new()];
+        let (mut row, mut col) = (0, 0);
+        let mut cursor = (0, 0);
+        for (index, c) in self.text.iter().enumerate() {
+            let cell_width = Line::raw(c.to_string()).width();
+            if *c != '\n' && col + cell_width > width {
+                lines.push(String::new());
+                row += 1;
+                col = 0;
+            }
+            if index == self.cursor {
+                cursor = (row, col);
+            }
+            if *c == '\n' {
+                lines.push(String::new());
+                row += 1;
+                col = 0;
+            } else {
+                lines[row].push(*c);
+                col += cell_width;
+            }
+        }
+        if self.cursor == self.text.len() {
+            if col >= width {
+                lines.push(String::new());
+                row += 1;
+                col = 0;
+            }
+            cursor = (row, col);
+        }
+        (lines, cursor.0, cursor.1)
+    }
     pub(crate) fn key(&mut self, code: KeyCode) {
         match code {
             KeyCode::Char(c) => self.insert(&c.to_string()),
@@ -301,11 +386,14 @@ fn draw(f: &mut Frame, settings: &Settings, editor: &Editor, messages: &[String]
         .lines()
         .map(|line| Line::raw(line).width().div_ceil(status_width).max(1))
         .sum::<usize>() as u16;
+    let input_width = f.area().width.saturating_sub(6).max(1) as usize;
+    let (input_lines, cursor_row, cursor_col) = editor.layout(input_width);
+    let input_height = (input_lines.len() + 2).clamp(3, 8) as u16;
     let rows = Layout::vertical([
         Constraint::Length(3),
         Constraint::Length(status_height.min(f.area().height.saturating_sub(14).max(2))),
         Constraint::Min(1),
-        Constraint::Length(3),
+        Constraint::Length(input_height),
         Constraint::Length(2),
     ])
     .margin(1)
@@ -354,40 +442,29 @@ fn draw(f: &mut Frame, settings: &Settings, editor: &Editor, messages: &[String]
             .scroll((scroll, 0)),
         rows[2],
     );
-    let width = rows[3].width.saturating_sub(4) as usize;
-    let start = editor.cursor.saturating_sub(width.saturating_sub(1));
-    let visible: String = editor
-        .text
-        .iter()
-        .skip(start)
-        .take(width)
-        .map(|c| if *c == '\n' { '↵' } else { *c })
-        .collect();
+    let scroll = cursor_row.saturating_sub(rows[3].height.saturating_sub(3) as usize);
+    let input = if editor.text.is_empty() {
+        "Describe your task, or /help".into()
+    } else {
+        input_lines.join("\n")
+    };
     f.render_widget(
-        Paragraph::new(if editor.text.is_empty() {
-            "Describe your task, or /help"
-        } else {
-            &visible
-        })
-        .block(
-            Block::bordered()
-                .title(" You ")
-                .border_style(Style::default().fg(ACCENT)),
-        ),
+        Paragraph::new(input)
+            .scroll((scroll.min(u16::MAX as usize) as u16, 0))
+            .block(
+                Block::bordered()
+                    .title(" You ")
+                    .border_style(Style::default().fg(ACCENT)),
+            ),
         rows[3],
     );
-    let prefix: String = editor
-        .text
-        .iter()
-        .skip(start)
-        .take(editor.cursor - start)
-        .map(|c| if *c == '\n' { '↵' } else { *c })
-        .collect();
-    let cursor_x = Line::raw(prefix).width().min(width) as u16;
     if rows[3].height >= 3 && rows[3].width >= 4 {
-        f.set_cursor_position((rows[3].x + 1 + cursor_x, rows[3].y + 1));
+        f.set_cursor_position((
+            rows[3].x + 1 + cursor_col.min(input_width - 1) as u16,
+            rows[3].y + 1 + cursor_row.saturating_sub(scroll) as u16,
+        ));
     }
-    f.render_widget(Paragraph::new("Enter Send · F2 Provider · Ctrl-U Clear · Ctrl-C Exit\nF3 Decisions (native) · /help Commands").style(Style::default().fg(MUTED)), rows[4]);
+    f.render_widget(Paragraph::new("Enter Send · Shift-Enter New line · Ctrl-U Clear · Ctrl-C Exit\nF2 Provider · F3 Decisions (native) · /help Commands").style(Style::default().fg(MUTED)), rows[4]);
 }
 
 pub async fn prompt(settings: &mut Settings, messages: &mut Vec<String>) -> Result<Command> {
@@ -424,6 +501,9 @@ pub async fn prompt(settings: &mut Settings, messages: &mut Vec<String>) -> Resu
                         }
                         .into();
                     }
+                }
+                KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                    editor.insert("\n")
                 }
                 KeyCode::Enter => {
                     let line = editor.take();
@@ -490,6 +570,26 @@ mod tests {
         }
     }
     #[test]
+    fn preferences_remember_provider_without_persisting_workspace_or_consent() {
+        let home = tempfile::tempdir().unwrap();
+        let mut settings = Settings::default();
+        interpret("/provider claude", &mut settings).unwrap();
+        interpret("/model claude-opus-5", &mut settings).unwrap();
+        interpret("/jev typesafe", &mut settings).unwrap();
+        interpret("/effort medium", &mut settings).unwrap();
+        interpret("/permissions full-access", &mut settings).unwrap();
+        settings.save(home.path()).unwrap();
+        let saved = std::fs::read_to_string(home.path().join("preferences-v1.json")).unwrap();
+        assert!(!saved.contains("workspace") && !saved.contains("auto_approve"));
+        let restored = Settings::load(home.path()).unwrap();
+        assert_eq!(restored.provider, "claude");
+        assert_eq!(restored.decision, "jev");
+        assert_eq!(restored.effort.as_deref(), Some("medium"));
+        assert!(!restored.auto_approve);
+        settings.next_provider();
+        assert!(!settings.auto_approve && settings.effort.is_none());
+    }
+    #[test]
     fn home_auto_approval_is_explicit_native_and_reset_on_provider_change() {
         let mut settings = Settings::default();
         assert!(interpret("/permissions full-access", &mut settings).is_err());
@@ -507,6 +607,16 @@ mod tests {
         interpret("/permissions full-access", &mut settings).unwrap();
         interpret("/provider codex", &mut settings).unwrap();
         assert!(!settings.auto_approve);
+    }
+    #[test]
+    fn multiline_input_wraps_without_changing_pasted_task() {
+        let mut editor = Editor::default();
+        editor.insert("123456\nşeker\nfinal");
+        let original: String = editor.text.iter().collect();
+        let (lines, row, col) = editor.layout(5);
+        assert_eq!(lines, vec!["12345", "6", "şeker", "final", ""]);
+        assert_eq!((row, col), (4, 0));
+        assert_eq!(editor.take(), original);
     }
     #[test]
     fn editor_handles_unicode_paste_without_submitting_or_injecting_controls() {

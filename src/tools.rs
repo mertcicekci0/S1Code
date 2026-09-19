@@ -201,6 +201,41 @@ impl Workspace {
         }
         Ok(hash(&serde_json::to_vec(&(&self.root, records))?))
     }
+    /// A unique exact replacement reduces generated output without fuzzy mutation.
+    pub fn replacement(
+        &self,
+        path: &str,
+        before_hash: &str,
+        old: &str,
+        new: &str,
+    ) -> Result<Action> {
+        ensure!(
+            !old.is_empty() && old != new,
+            "replacement must change a nonempty exact snippet"
+        );
+        let bytes = self.bytes(path)?;
+        ensure!(
+            hash(&bytes) == before_hash,
+            "replacement original hash mismatch; read current file first"
+        );
+        let text = std::str::from_utf8(&bytes).context("replacement requires UTF-8")?;
+        ensure!(
+            bytes
+                .windows(old.len())
+                .filter(|window| *window == old.as_bytes())
+                .count()
+                == 1,
+            "replacement snippet must occur exactly once; read more surrounding context"
+        );
+        let edits = vec![Edit {
+            path: path.into(),
+            before_hash: Some(before_hash.into()),
+            content: text.replacen(old, new, 1),
+        }];
+        self.validate_edits(&edits)?;
+        Ok(Action::Patch { edits })
+    }
+
     pub fn validate_edits(&self, edits: &[Edit]) -> Result<Vec<(PathBuf, Option<Vec<u8>>)>> {
         ensure!(
             !edits.is_empty() && edits.len() <= 16,

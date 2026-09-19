@@ -71,3 +71,9 @@ diagnostics. The offline demo header explicitly says that no model calls occur.
 Use `--exclude relative/path` to protect additional native paths. Hidden files,
 ignored files, symlinks, common secret names, dependency directories and `.git`
 are unavailable to native file tools. See SECURITY.md for trusted-code limits.
+
+Provider, model, effort and decision preferences are saved on leaving the entry
+screen; reopen `s1code` in any project to reuse them. Workspace always starts at the
+current directory and automatic approval is not saved as a global preference.
+Use Shift-Enter for a newline or paste a multiline task. `/output-limit 16384` and
+`/effort medium` configure native generation; Opus/Sonnet 5 already default to medium.

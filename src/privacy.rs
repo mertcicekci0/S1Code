@@ -12,7 +12,10 @@ impl Redactor {
         }
     }
     pub fn contains_secret(&self, text: &str) -> bool {
-        self.secrets.iter().any(|s| text.contains(s))
+        self.secrets
+            .iter()
+            .chain(crate::credentials::loaded_secrets().iter())
+            .any(|s| text.contains(s))
     }
     pub fn environment(workspace: &str) -> Self {
         let mut secrets: Vec<String> = std::env::vars()

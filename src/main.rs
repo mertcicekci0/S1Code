@@ -525,10 +525,11 @@ async fn interactive_home(home: PathBuf) -> Result<()> {
         io::stdin().is_terminal() && io::stdout().is_terminal(),
         "Use s1code run TASK --headless outside a terminal"
     );
-    let mut settings = Settings::default();
+    let mut settings = Settings::load(&home)?;
     let mut messages = vec![];
     loop {
         let command = s1code::home::prompt(&mut settings, &mut messages).await?;
+        settings.save(&home)?;
         let operation = match command {
             Command::Exit => return Ok(()),
             Command::Task(task) => {

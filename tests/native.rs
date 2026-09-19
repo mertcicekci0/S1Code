@@ -453,3 +453,60 @@ async fn truncated_generation_recovery_is_bounded_counted_and_never_executes_par
         assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
     }
 }
+
+#[test]
+fn exact_replacement_materializes_a_reviewable_patch_and_rejects_ambiguity() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("code.js");
+    let original = "// şeker\nconst count = 1;\n";
+    fs::write(&file, original).unwrap();
+    let workspace = Workspace::new(root.path(), vec![]).unwrap();
+    let digest = hash(original.as_bytes());
+    let action = workspace
+        .replacement("code.js", &digest, "count = 1", "count = 2")
+        .unwrap();
+    let Action::Patch { edits } = action else {
+        panic!("expected materialized patch")
+    };
+    assert_eq!(edits[0].before_hash.as_deref(), Some(digest.as_str()));
+    assert_eq!(edits[0].content, "// şeker\nconst count = 2;\n");
+    assert_eq!(fs::read_to_string(&file).unwrap(), original); // Proposal does not mutate.
+    assert!(
+        workspace
+            .replacement("code.js", &digest, "", "new")
+            .is_err()
+    );
+    assert!(
+        workspace
+            .replacement("code.js", &digest, "missing", "new")
+            .is_err()
+    );
+    assert!(
+        workspace
+            .replacement("code.js", &digest, "count", "count")
+            .is_err()
+    );
+    assert!(
+        workspace
+            .replacement("../escape", &digest, "x", "y")
+            .is_err()
+    );
+    fs::write(&file, "aaa").unwrap();
+    assert!(
+        workspace
+            .replacement("code.js", &digest, "count", "new")
+            .is_err()
+    );
+    assert!(
+        workspace
+            .replacement("code.js", &hash(b"aaa"), "aa", "b")
+            .is_err()
+    );
+    let unmaterialized = Action::Replace {
+        path: "code.js".into(),
+        before_hash: digest,
+        old: "a".into(),
+        new: "b".into(),
+    };
+    assert_eq!(policy::classify(&unmaterialized), PolicyClass::Deny);
+}

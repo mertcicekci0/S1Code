@@ -60,3 +60,9 @@ with the session and remains active on resume; new sessions default to manual
 approval. Each automatic approval records the exact candidate and patch diff. This
 is not unrestricted shell/filesystem access and is rejected in Codex bridge mode.
 Use it only with trusted repository code; commands have no OS sandbox.
+
+Exact replacement proposals are not directly executable. The runtime requires the
+observed file hash and exactly one matching snippet, constructs the full patch and
+then runs ordinary validation/approval. No fuzzy replacement or model-computed hash
+can bypass those checks. Saved interactive preferences exclude execution consent,
+credentials and workspace paths.

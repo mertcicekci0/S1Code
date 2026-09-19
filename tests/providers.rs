@@ -524,7 +524,7 @@ async fn claude_http_fixture_drives_native_patch_and_real_verification() {
     let actions = [
         run.clone(),
         json!({"type":"read","path":"parser.py","start":1,"lines":40}),
-        json!({"type":"patch","edits":[{"path":"parser.py","before_hash":hash(original.as_bytes()),"content":patch}]}),
+        json!({"type":"replace","path":"parser.py","before_hash":hash(original.as_bytes()),"old":"int(text.strip()[0])","new":"int(text.strip())"}),
         run,
         json!({"type":"finish","summary":"Fixture checks passed"}),
     ];

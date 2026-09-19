@@ -156,3 +156,10 @@ searches are skipped, and rejected candidate diagnostics reach subsequent planni
 Provider integration tests (17), library tests (17) and all-target clippy passed.
 The local HTTP fixture performs a real patch and verification with streamed tool
 calls. This is not a successful live Snake run; live acceptance remains outstanding.
+
+Exact replacement proposals now materialize into a complete, hash-bound patch before
+selection. Ambiguous, missing, unchanged, overlapping and stale snippets fail without
+mutation; approvals and rollback use the existing full-patch path. Interactive home
+remembers provider/model/decision preferences (not workspace, credentials or consent),
+preserves multiline input, and resets auto-approval on either provider-switch route.
+Keychain presence is cached for rendering and permission waits have a 15-second bound.

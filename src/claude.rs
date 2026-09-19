@@ -166,6 +166,7 @@ fn action_tools() -> Vec<Value> {
             input["required"].as_array_mut().unwrap().retain(|v| v != "type");
             let purpose = match kind {
                 "read" => "Read existing UTF-8 file lines and its exact hash before editing. At most 300 lines.",
+                "replace" => "Replace one unique exact snippet in a previously read file. Supply the observed full-file before_hash plus old and new text. Runtime materializes a complete patch for review; no fuzzy matching.",
                 "patch" => "Propose complete replacement content for one file. Use the exact observed before_hash; null creates a new file. This does not apply immediately: runtime policy and consent are enforced.",
                 "run" => "Propose a supported test command with exact argv and verification=true. Runtime controls execution and permissions.",
                 "finish" => "Finish only after real current verification passes and all requested files/features are present. Never finish a partial task.",
@@ -223,6 +224,7 @@ fn decode_proposal(text: &str) -> Result<crate::domain::Proposal> {
                     "read",
                     "search",
                     "patch",
+                    "replace",
                     "run",
                     "rehydrate",
                     "blocked",
