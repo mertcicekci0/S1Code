@@ -37,7 +37,7 @@ jobs:
           python3 scripts/install.py --version "$version" --archive "target/dist/s1code-$version-${{ matrix.target }}.tar.gz" --checksums "target/dist/${{ matrix.target }}.sha256" --prefix "$RUNNER_TEMP/installed"
           "$RUNNER_TEMP/installed/bin/s1code" --version
           S1CODE_TEST_BINARY="$RUNNER_TEMP/installed/bin/s1code" python3 scripts/headless_smoke.py
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, Node 24
         with:
           name: binary-${{ matrix.target }}
           path: |
@@ -67,7 +67,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1, Node 24
         with:
           pattern: binary-*
           merge-multiple: true

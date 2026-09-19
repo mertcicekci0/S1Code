@@ -88,7 +88,7 @@ Baseline macOS ARM64 validation before the rc.8 changes passed:
   Generated notice files remain under target/notices for binary redistribution.
 
 Hosted macOS/Linux checks and the dependency-audit job passed for source commit
-`02219ee` ([run](https://github.com/mertcicekci0/S1Code/actions/runs/35454722733)).
+`0c826ee` ([run](https://github.com/mertcicekci0/S1Code/actions/runs/35456243903)).
 CI pins the checkout action to a reviewed release commit, disables persisted
 checkout credentials and pins the Ubuntu runner label.
 
