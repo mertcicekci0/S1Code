@@ -30,8 +30,13 @@ for package in sorted(metadata['packages'],key=lambda p:(p['name'],p['version'])
         if file.is_file():
             contents.append(f"--- {file.name} ---\n"+file.read_text(errors='replace'))
     if not contents: problems.append(f"Notice text absent from registry archive: {package['name']} {package['version']}; retrieve before binary redistribution")
-    packages.append(dict(name=package['name'],version=package['version'],license=expression,selected_license=accepted[0] if accepted else None,source=package['source']))
-    notices.append(f"\n{'='*70}\n{package['name']} {package['version']}\nSPDX: {expression}\n"+'\n'.join(contents))
+    source_url = None
+    if package['source'] == 'registry+https://github.com/rust-lang/crates.io-index':
+        source_url = f"https://crates.io/api/v1/crates/{package['name']}/{package['version']}/download"
+    else:
+        problems.append(f"Review source availability for non-crates.io dependency: {package['name']} {package['version']}")
+    packages.append(dict(name=package['name'],version=package['version'],license=expression,selected_license=accepted[0] if accepted else None,source=package['source'],source_url=source_url))
+    notices.append(f"\n{'='*70}\n{package['name']} {package['version']}\nSPDX: {expression}\nOriginal source (including license notices): {source_url or 'REVIEW REQUIRED'}\n"+'\n'.join(contents))
 out=pathlib.Path('target/notices');out.mkdir(parents=True,exist_ok=True)
 (out/'inventory.json').write_text(json.dumps(packages,indent=2)+'\n')
 (out/'THIRD_PARTY_LICENSES.txt').write_text('S1Code dependency notices, generated from Cargo.lock registry archives.\n'+'\n'.join(notices))

@@ -4,7 +4,16 @@ The source uses Cargo.lock and Rust 1.94.0. `scripts/dependency_licenses.py` wal
 resolved dependency graph for the current host, validates that at least one SPDX
 license alternative is in its reviewed set, and assembles the original license and
 notice files into `target/notices/THIRD_PARTY_LICENSES.txt`. Include that bundle
-when redistributing a binary. Repeat the check for each distribution target.
+when redistributing a binary. Each entry includes a version-specific source archive
+URL as well as the original notices. Non-crates.io sources require explicit review.
+Repeat the check for each distribution target.
+
+`option-ext` 0.2.0 is an unmodified MPL-2.0 dependency. Its original source and
+license notices are available in the [0.2.0 source archive](https://crates.io/api/v1/crates/option-ext/0.2.0/download).
+Binary notice bundles include that retrieval link, following the source-availability
+requirement described in [MPL section 3.2](https://www.mozilla.org/en-US/MPL/2.0/) and
+[Mozilla's distribution FAQ](https://www.mozilla.org/en-US/MPL/2.0/FAQ/#q8-i-want-to-distribute-outside-my-organization-executable-programs-or-libraries-that-i-have-compiled-from-someone-elses-unchanged-mpl-licensed-source-code-either-standalone-or-part-of-a-larger-work-what-do-i-have-to-do).
+The MPL applies to that dependency; new S1Code code remains Apache-2.0.
 
 The 2026-09-19 local audit used cargo-audit 0.22.2 and RustSec database commit
 `d5c17953a895cf19e8d3ce66eaa42b6fcfe1fb16` (updated 2026-09-19). The initial terminal
