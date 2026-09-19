@@ -1,5 +1,14 @@
 # Privacy
 
+The installed binary's `auth set PROVIDER` command (or `/auth PROVIDER` on the
+home screen) stores an API key in macOS login Keychain through the system Security
+framework. Input is hidden and never passed in process arguments, exported into
+the environment, or written to the project. Accounts are `openai`, `claude`,
+`typesafe` and `openrouter` under `s1code.credentials.v1`; the three existing launcher
+accounts remain compatible. `auth remove PROVIDER` deletes only that local entry,
+not a key in the provider account. Explicit environment variables override saved
+keys. Linux users currently provide keys through their environment or secret manager.
+
 No S1Code telemetry is enabled. Native mode sends the task and selected active
 repository/tool evidence to the configured generation provider. Selecting Jev also
 sends focused decision evidence to TypeSafe. No silent cross-provider fallback is

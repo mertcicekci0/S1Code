@@ -19,7 +19,7 @@ use std::{io, path::PathBuf};
 
 const ACCENT: Color = Color::Rgb(111, 211, 194);
 const MUTED: Color = Color::Rgb(151, 163, 177);
-pub const HELP: &str = "/provider codex|openai|claude  /model opus|sonnet|MODEL_ID  /effort LEVEL  /output-limit TOKENS  /decision rules|jev|generative\n/jev openrouter|typesafe  /eviction jev|conservative|off  /workspace PATH  /permissions manual|full-access  /login  /account  /sessions\n/resume [latest|ID|PREFIX]  /continue ID (Codex)  /demo  /claude-code  /help  /exit\nNative keys: OPENAI_API_KEY or ANTHROPIC_API_KEY; Jev: OPENROUTER_API_KEY or TYPESAFE_API_KEY. Set keys in the environment, never in this prompt.";
+pub const HELP: &str = "/provider codex|openai|claude  /model opus|sonnet|MODEL_ID  /effort LEVEL  /output-limit TOKENS  /decision rules|jev|generative\n/jev openrouter|typesafe  /eviction jev|conservative|off  /workspace PATH  /permissions manual|full-access  /login  /account  /auth PROVIDER (macOS)  /sessions\n/resume [latest|ID|PREFIX]  /continue ID (Codex)  /demo  /claude-code  /help  /exit\nNative keys: OPENAI_API_KEY or ANTHROPIC_API_KEY; Jev: OPENROUTER_API_KEY or TYPESAFE_API_KEY. Use /auth PROVIDER for a hidden Keychain prompt on macOS, or your environment. Never paste keys as chat text.";
 
 #[derive(Clone)]
 pub struct Settings {
@@ -199,6 +199,7 @@ pub enum Command {
     Task(String),
     Login,
     Account,
+    Auth(String),
     Sessions,
     Resume(String, bool),
     Demo,
@@ -319,6 +320,10 @@ pub fn interpret(line: &str, settings: &mut Settings) -> Result<Option<Command>>
         }
         "/login" if args.is_empty() => return Ok(Some(Command::Login)),
         "/account" if args.is_empty() => return Ok(Some(Command::Account)),
+        "/auth" => {
+            crate::credentials::variable(args)?;
+            return Ok(Some(Command::Auth(args.into())));
+        }
         "/sessions" if args.is_empty() => return Ok(Some(Command::Sessions)),
         "/resume" | "/continue" => {
             let args = if args.is_empty() { "latest" } else { args };

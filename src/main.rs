@@ -102,6 +102,13 @@ enum Commands {
         max_steps: Option<usize>,
     },
     Sessions,
+    /// Manage native API keys in macOS Keychain; never makes an inference request.
+    Auth {
+        #[arg(value_parser=["set", "remove"])]
+        operation: String,
+        #[arg(value_parser=["openai", "claude", "typesafe", "openrouter"])]
+        provider: String,
+    },
     Eval {
         #[arg(long, default_value = "fixtures/core")]
         suite: PathBuf,
@@ -431,6 +438,16 @@ async fn execute(cmd: Commands, home: PathBuf) -> Result<()> {
                 println!("{}", serde_json::to_string(&session)?);
             }
         }
+        Commands::Auth {
+            operation,
+            provider,
+        } => {
+            s1code::credentials::manage(&operation, &provider)?;
+            println!(
+                "{}",
+                serde_json::json!({"provider":provider,"operation":operation,"store":"macOS Keychain","inference_requests":0,"note":"Explicit environment keys take precedence. This command does not validate provider access or modify environment variables."})
+            );
+        }
         Commands::Login { .. } => {
             account_command("login").await?;
         }
@@ -583,6 +600,10 @@ async fn interactive_home(home: PathBuf) -> Result<()> {
             Command::Login => Commands::Login {
                 provider: "codex".into(),
             },
+            Command::Auth(provider) => Commands::Auth {
+                operation: "set".into(),
+                provider,
+            },
             Command::Account => {
                 let cancel = CancellationToken::new();
                 match s1code::bridge::account("status", &cancel).await {
@@ -627,9 +648,12 @@ async fn interactive_home(home: PathBuf) -> Result<()> {
             operation,
             Commands::Run(_) | Commands::Resume { .. } | Commands::Demo { .. }
         );
+        let auth_operation = matches!(operation, Commands::Auth { .. });
         match execute(operation, home.clone()).await {
             Ok(()) => {
-                if task_operation {
+                if auth_operation {
+                    messages.push("S1Code: API key saved in macOS Keychain. Future native tasks reuse it. No inference request was sent; explicit environment keys still take precedence.".into());
+                } else if task_operation {
                     let rows = session_rows(&home);
                     messages.push(format!("S1Code: Task view closed. Latest saved task:\n{}\nType another task, or /resume ID. New prompts start independent tasks.", rows.first().map(String::as_str).unwrap_or("No session created")));
                 } else {

@@ -4,6 +4,13 @@ From the source checkout, `cargo install --path . --locked` builds the pinned Ru
 release binary. Run `s1code doctor` to check storage, credential presence, and CLI
 compatibility. Doctor never prints keys.
 
+On macOS the installed binary can store keys directly: `s1code auth set claude`
+and `s1code auth set typesafe` open hidden prompts backed by login Keychain.
+This is a one-time setup with no model call. `/auth PROVIDER` on the home screen
+does the same; never type the key itself into the task field. `auth remove PROVIDER`
+removes a saved entry. OpenAI and OpenRouter are supported too. Linux uses environment
+keys or a secret manager and reports the persistent-storage limitation explicitly.
+
 Run `s1code` for the interactive task-entry screen. `/login` connects the official
 Codex bridge to your ChatGPT account, `F2` changes provider, and `/help` shows setup.
 On macOS, native Claude/Jev automatically reuse keys previously saved by the

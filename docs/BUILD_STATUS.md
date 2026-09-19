@@ -6,6 +6,12 @@ and no cost, speed or task-quality superiority claim is established.
 
 ## Implemented
 
+- Installed native `auth set/remove PROVIDER` and home `/auth PROVIDER` manage
+  API keys through macOS Keychain, with hidden input and no model request. Existing
+  saved credentials remain compatible; OpenAI now supports saved keys too. Linux
+  reports its environment/secret-manager requirement. Offline validation covers
+  provider mismatches and hidden-input rejection, without writing user credentials.
+
 - Recognized zero-test summaries no longer satisfy completion. Actual empty
   unittest execution and mixed Cargo/Node/Python summaries have regression coverage;
   18 native integration tests pass. Compiler checks remain separately supported.

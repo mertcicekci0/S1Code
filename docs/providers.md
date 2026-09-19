@@ -1,5 +1,19 @@
 # Providers and authentication
 
+## Store a native key once on macOS
+
+Use `s1code auth set claude`, `s1code auth set typesafe`, `s1code auth set openai`
+or `s1code auth set openrouter`. The installed binary opens a hidden terminal prompt
+and saves the value through the system Keychain API. `/auth PROVIDER` is available
+on the home screen. Do not include the secret in the command itself. Storing a key
+does not send a provider request, verify credit, or authorize inference spending.
+
+`s1code auth remove PROVIDER` removes the saved local entry. It does not revoke the
+provider key; do that at the provider if needed. Explicit environment keys continue
+to override saved entries. Linux currently uses environment variables or a secret
+manager. No plaintext-file fallback is implemented. Managed ChatGPT authentication
+continues to use `s1code login codex`, separately from API keys.
+
 ## Native generation
 
 OpenAI Responses HTTP endpoint: `https://api.openai.com/v1/responses`, API-key

@@ -11,4 +11,5 @@ python3 scripts/headless_smoke.py
 python3 scripts/terminal_smoke.py
 python3 scripts/home_smoke.py
 python3 scripts/conversation_smoke.py
+python3 scripts/credential_smoke.py
 python3 scripts/dependency_licenses.py

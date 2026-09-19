@@ -1,11 +1,26 @@
 //! Read existing credentials without exporting them to child-process environments.
-use anyhow::{Context, Result, bail};
-use std::sync::Mutex;
+use anyhow::{Context, Result, bail, ensure};
+use std::sync::{Mutex, OnceLock};
 
 static LOADED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static PRESENCE: OnceLock<Mutex<std::collections::BTreeMap<String, bool>>> = OnceLock::new();
+pub const SERVICE: &str = "s1code.credentials.v1";
+
+pub fn variable(provider: &str) -> Result<&'static str> {
+    match provider {
+        "openai" => Ok("OPENAI_API_KEY"),
+        "claude" => Ok("ANTHROPIC_API_KEY"),
+        "typesafe" => Ok("TYPESAFE_API_KEY"),
+        "openrouter" => Ok("OPENROUTER_API_KEY"),
+        _ => bail!(
+            "Use openai, claude, typesafe or openrouter for API keys; login codex manages ChatGPT authentication"
+        ),
+    }
+}
 
 fn account(variable: &str) -> Option<&'static str> {
     match variable {
+        "OPENAI_API_KEY" => Some("openai"),
         "ANTHROPIC_API_KEY" => Some("claude"),
         "TYPESAFE_API_KEY" => Some("typesafe"),
         "OPENROUTER_API_KEY" => Some("openrouter"),
@@ -40,8 +55,6 @@ pub fn present(variable: &str) -> bool {
     if std::env::var("S1CODE_KEYCHAIN").as_deref() == Ok("off") {
         return false;
     }
-    static PRESENCE: std::sync::OnceLock<Mutex<std::collections::BTreeMap<String, bool>>> =
-        std::sync::OnceLock::new();
     let mut presence = PRESENCE
         .get_or_init(Mutex::default)
         .lock()
@@ -72,13 +85,9 @@ fn lookup(variable: &str, secret: bool) -> Result<Vec<u8>> {
         bail!("Saved credentials require macOS Keychain; set {variable}");
     }
     let mut command = std::process::Command::new("/usr/bin/security");
-    command.env_clear().args([
-        "find-generic-password",
-        "-s",
-        "s1code.credentials.v1",
-        "-a",
-        account,
-    ]);
+    command
+        .env_clear()
+        .args(["find-generic-password", "-s", SERVICE, "-a", account]);
     if secret {
         command.arg("-w");
     }
@@ -89,6 +98,83 @@ fn lookup(variable: &str, secret: bool) -> Result<Vec<u8>> {
         );
     }
     Ok(if secret { output.stdout } else { Vec::new() })
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn validate_secret(provider: &str, value: &str) -> Result<()> {
+    variable(provider)?;
+    ensure!(
+        (16..=4096).contains(&value.len())
+            && !value.chars().any(char::is_whitespace)
+            && !value.chars().any(char::is_control),
+        "Enter the complete API secret without whitespace; no key was saved"
+    );
+    let looks_wrong = match provider {
+        "claude" => !value.starts_with("sk-ant-"),
+        "typesafe" => value.starts_with("sk-"),
+        "openrouter" => !value.starts_with("sk-or-"),
+        "openai" => {
+            value.starts_with("sk-ant-")
+                || value.starts_with("sk-or-")
+                || value.starts_with("apikey_")
+        }
+        _ => true,
+    };
+    ensure!(
+        !looks_wrong,
+        "This key appears to belong to a different provider; no key was saved"
+    );
+    Ok(())
+}
+
+/// Explicit foreground credential management, never part of a model/tool action.
+pub fn manage(operation: &str, provider: &str) -> Result<()> {
+    variable(provider)?;
+    ensure!(
+        matches!(operation, "set" | "remove"),
+        "Use auth set or auth remove"
+    );
+    ensure!(
+        std::env::var("S1CODE_KEYCHAIN").as_deref() != Ok("off"),
+        "Keychain is disabled by S1CODE_KEYCHAIN=off; no credential was changed"
+    );
+    #[cfg(target_os = "macos")]
+    {
+        use security_framework::passwords::{delete_generic_password, set_generic_password};
+        use std::io::IsTerminal;
+        if operation == "set" {
+            ensure!(
+                std::io::stdin().is_terminal(),
+                "API secrets must be entered at the hidden terminal prompt, not as arguments or redirected input"
+            );
+            let secret = rpassword::prompt_password(format!(
+                "{provider} API secret (hidden; stored in macOS Keychain): "
+            ))
+            .context("Could not read the hidden API secret")?;
+            validate_secret(provider, &secret)?;
+            set_generic_password(SERVICE, provider, secret.as_bytes())
+                .map_err(|_| anyhow::anyhow!("Could not save to macOS Keychain. Unlock it or allow access, then retry. No plaintext fallback was used."))?;
+            LOADED
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(secret);
+        } else if let Err(error) = delete_generic_password(SERVICE, provider) {
+            // Removing an already absent credential is safe and idempotent.
+            ensure!(
+                error.code() == -25300,
+                "Could not remove the saved Keychain entry; unlock or allow Keychain access, then retry"
+            );
+        }
+        if let Some(presence) = PRESENCE.get() {
+            presence.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    bail!(
+        "Persistent API-key entry currently requires macOS Keychain. Configure {} through your environment or secret manager on this platform; no file was written.",
+        variable(provider)?
+    )
 }
 
 fn bounded_output(
@@ -145,9 +231,33 @@ mod tests {
     }
     #[test]
     fn provider_accounts_are_separate() {
+        assert_eq!(account("OPENAI_API_KEY"), Some("openai"));
         assert_eq!(account("ANTHROPIC_API_KEY"), Some("claude"));
         assert_eq!(account("TYPESAFE_API_KEY"), Some("typesafe"));
         assert_eq!(account("OPENROUTER_API_KEY"), Some("openrouter"));
         assert_eq!(account("UNTRUSTED"), None);
+    }
+    #[test]
+    fn credential_entry_rejects_cross_provider_keys_without_echoing_them() {
+        for (provider, prefix) in [
+            ("claude", "apikey_"),
+            ("typesafe", "sk-ant-"),
+            ("openai", "sk-or-"),
+            ("openrouter", "sk-ant-"),
+        ] {
+            let value = format!("{prefix}{}", "placeholder".repeat(3));
+            let error = validate_secret(provider, &value).unwrap_err().to_string();
+            assert!(!error.contains(&value));
+        }
+        for (provider, prefix) in [
+            ("claude", "sk-ant-"),
+            ("typesafe", "apikey_"),
+            ("openai", "sk-"),
+            ("openrouter", "sk-or-"),
+        ] {
+            let value = format!("{prefix}{}", "placeholder".repeat(3));
+            assert!(validate_secret(provider, &value).is_ok());
+            assert!(validate_secret(provider, &format!("{value}\n")).is_err());
+        }
     }
 }

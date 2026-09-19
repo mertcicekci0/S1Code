@@ -30,6 +30,10 @@ tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
 uuid = { version = "1", features = ["v4", "serde"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+rpassword = "7.5"
+security-framework = "3.7"
+
 [dev-dependencies]
 proptest = "1"
 

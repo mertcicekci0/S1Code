@@ -1,5 +1,13 @@
 # References and provenance
 
+2026-09-19 credential entry: consulted the published
+[security-framework 3.7 passwords API](https://docs.rs/security-framework/3.7.0/security_framework/passwords/index.html)
+and its registry `src/passwords.rs`, plus the
+[rpassword 7.5 API](https://docs.rs/rpassword/7.5.4/rpassword/).
+These are linked dependencies for system Keychain writes and hidden terminal input;
+no source was vendored or adapted. Their notices are included by the dependency
+inventory command for binary redistribution.
+
 Reviewed 2026-09-18. No reference-project source was copied, translated, or adapted.
 API field names implement public wire contracts. Newly authored code is Apache-2.0.
 

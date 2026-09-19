@@ -95,6 +95,23 @@ Explicit environment keys take precedence; no repeated export commands are neede
 
 ## Native provider setup
 
+On macOS, save native API keys once from the installed binary:
+
+```sh
+s1code auth set claude
+s1code auth set typesafe
+s1code
+```
+
+Each command opens a hidden prompt and saves to login Keychain. Keys never go in
+arguments or project files. Inside the home screen, `/auth claude` and `/auth typesafe`
+open the same prompts; `/provider claude`, `/model opus`, `/jev typesafe` select the
+native loop. Provider/model choices are remembered. Saving a key makes no model
+request and does not establish account credit or model access. `auth remove PROVIDER`
+deletes the saved entry; an explicitly set environment key still takes precedence.
+OpenAI and OpenRouter also support `auth set`. On Linux, use environment keys or
+your secret manager; persistent key entry is currently macOS-only.
+
 For OpenAI, set `OPENAI_API_KEY` in your environment using your normal secret-management
 workflow. No key is needed for offline tests. Do not put secrets in command history
 or project files. The default generation model is `gpt-4.1-2025-04-14`; use `--model`
