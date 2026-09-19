@@ -50,6 +50,9 @@ Only the final draft job has repository write access; build jobs have read acces
 gh workflow run release.yml --ref main
 ```
 
+Use `-f create_draft=false` to test packaging and asset assembly without creating
+or replacing a release (for example, when that version already has a draft).
+
 The final job creates an **unpublished prerelease draft**, with two binary archives,
 SHA256SUMS and the installer. It refuses to overwrite an existing release. Before
 publication, inspect the exact commit's checks and downloaded assets, their

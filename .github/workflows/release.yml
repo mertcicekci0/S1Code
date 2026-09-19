@@ -1,6 +1,11 @@
 name: release candidate binaries
 on:
   workflow_dispatch:
+    inputs:
+      create_draft:
+        description: Create a new unpublished release after validation
+        type: boolean
+        default: true
 permissions:
   contents: read
 concurrency:
@@ -72,13 +77,17 @@ jobs:
           pattern: binary-*
           merge-multiple: true
           path: release-assets
+      - name: Verify assembled release assets
+        shell: bash
+        run: |
+          cat release-assets/*.sha256 > release-assets/SHA256SUMS
+          (cd release-assets && sha256sum --check SHA256SUMS)
+          cp scripts/install.py release-assets/install.py
       - name: Create an unpublished prerelease for final review
+        if: ${{ inputs.create_draft }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml","rb"))["package"]["version"])')
-          cat release-assets/*.sha256 > release-assets/SHA256SUMS
-          (cd release-assets && sha256sum --check SHA256SUMS)
-          cp scripts/install.py release-assets/install.py
           gh release create "v$version" release-assets/*.tar.gz release-assets/SHA256SUMS release-assets/install.py --draft --prerelease --target "$GITHUB_SHA" --title "S1Code $version — experimental preview" --notes-file docs/release-notes.md
