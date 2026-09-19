@@ -60,6 +60,7 @@ impl Settings {
             .context("Invalid preferences-v1.json; move it aside to reset preferences")?;
         ensure!(saved["version"] == 1, "unsupported preferences version");
         let mut settings = Self::default();
+        let mut repaired = false;
         for (key, command) in [
             ("provider", "/provider"),
             ("model", "/model"),
@@ -71,7 +72,22 @@ impl Settings {
             if key != "provider" && settings.provider == "codex" && key != "model" {
                 continue;
             }
-            if let Some(value) = saved[key].as_str() {
+            if let Some(mut value) = saved[key].as_str() {
+                // rc.4 began rejecting incomplete IDs. Repair the two exact legacy
+                // values that an already-open older process could write on exit.
+                if key == "model" && settings.provider == "claude" {
+                    value = match value {
+                        "claude-opus-" => {
+                            repaired = true;
+                            "claude-opus-5"
+                        }
+                        "claude-sonnet-" => {
+                            repaired = true;
+                            "claude-sonnet-5"
+                        }
+                        _ => value,
+                    };
+                }
                 // Jev endpoint preference must not silently turn a rules policy into Jev.
                 let old_decision = settings.decision.clone();
                 interpret(&format!("{command} {value}"), &mut settings)?;
@@ -82,6 +98,9 @@ impl Settings {
         }
         if let Some(value) = saved["max_output_tokens"].as_u64() {
             interpret(&format!("/output-limit {value}"), &mut settings)?;
+        }
+        if repaired {
+            settings.save(home)?;
         }
         Ok(settings)
     }
@@ -620,6 +639,20 @@ mod tests {
         assert_eq!(settings.model.as_deref(), Some("claude-sonnet-5"));
         assert!(interpret("/model claude-opus-", &mut settings).is_err());
         assert_eq!(settings.model.as_deref(), Some("claude-sonnet-5"));
+    }
+    #[test]
+    fn loading_repairs_known_incomplete_claude_model_left_by_an_older_process() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::write(
+            home.path().join("preferences-v1.json"),
+            br#"{"version":1,"provider":"claude","model":"claude-opus-","decision":"jev","jev_provider":"typesafe","eviction":"jev","max_output_tokens":16384}"#,
+        )
+        .unwrap();
+        let restored = Settings::load(home.path()).unwrap();
+        assert_eq!(restored.model.as_deref(), Some("claude-opus-5"));
+        assert_eq!(restored.decision, "jev");
+        let saved = std::fs::read_to_string(home.path().join("preferences-v1.json")).unwrap();
+        assert!(saved.contains("claude-opus-5") && !saved.contains("claude-opus-\""));
     }
     #[test]
     fn home_auto_approval_is_explicit_native_and_reset_on_provider_change() {

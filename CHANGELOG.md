@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0-rc.5 — Preference self-repair
+
+- Startup repairs the exact incomplete Claude model values an older, still-open
+  process could write after the rc.4 migration, then atomically saves the correction.
+
 ## 0.3.0-rc.4 — Safer model selection
 
 - Claude model shortcuts `/model opus` and `/model sonnet` expand to the complete
