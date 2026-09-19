@@ -73,9 +73,26 @@ for line in sys.stdin:
                 try: os.read(master,65536)
                 except OSError: break
         proc.wait(timeout=1)
+    def wait_text(master, needle):
+        output = bytearray()
+        end = time.monotonic()+5
+        while time.monotonic()<end:
+            if select.select([master], [], [], 0.05)[0]:
+                output.extend(os.read(master, 65536))
+                if needle in output:
+                    return
+        raise AssertionError(f'missing terminal marker {needle!r}')
     master, proc = launch(['run', 'hello fixture', '--mode', 'codex', '--workspace', str(base)])
     try:
         wait_input(master, proc, 1)
+        os.write(master, b'/help\r')
+        wait_text(master, b'Commands')
+        os.write(master, b'/not-a-command\r')
+        wait_text(master, b'Unknown')
+        os.write(master, b'\x0f')  # Ctrl+O works without macOS function keys.
+        wait_text(master, b'Activity')
+        os.write(master, b'\x1b')  # Return from inspector, do not close the task.
+        wait_text(master, b'Follow-up')
         os.write(master, b'now second fixture\r')
         wait_input(master, proc, 2)
         os.write(master, b'\x1b')

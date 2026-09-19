@@ -44,7 +44,9 @@ Claude API generation, `/jev typesafe` enables official Jev decisions in native 
 `/sessions` lists saved tasks, and `/help` explains setup. Keys are read from the
 environment, never from chat messages. Codex responses return to a message field on
 the same thread; Enter sends the next turn and Esc closes the conversation.
-F2 inside a task opens the activity/decision/context/diff inspector. Protocol events
+Ctrl+O (or F2) inside a task opens the activity/decision/context/diff inspector; Esc
+returns to the conversation. In the follow-up field, `/help`, `/activity`,
+`/decisions`, `/context` and `/diff` work locally without provider calls. Protocol events
 are hidden from the default conversation. Closing returns home; a new home prompt
 starts an independent saved task. Native tasks also accept follow-ups in the same conversation, retaining exact prior
 requests and captured evidence. Each submitted follow-up has a visible bounded

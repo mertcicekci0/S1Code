@@ -350,6 +350,47 @@ struct Screen {
     done: bool,
 }
 impl Screen {
+    fn inspect_view(&mut self, tab: usize) {
+        self.inspect = true;
+        self.tab = tab;
+        self.raw = false;
+        self.scroll = 0;
+    }
+    fn submit_input(&mut self) -> Option<UiInput> {
+        let text = self.editor.take();
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        match trimmed {
+            "/exit" | "/quit" => {
+                self.awaiting_input = false;
+                self.closing = true;
+                Some(UiInput::Close)
+            }
+            "/help" => {
+                self.message("Commands", "Keep typing to continue this saved task.\n/inspect or /activity · tool results and events\n/decisions · candidates and selection\n/context · stored evidence\n/diff · latest proposed patch\n/exit · close task and return\nCtrl+O (or F2) toggles the inspector; Esc returns from it.\nProvider and permission settings are available on the home screen.");
+                None
+            }
+            "/inspect" | "/activity" | "/decisions" | "/context" | "/diff" => {
+                self.inspect_view(match trimmed {
+                    "/decisions" => 1,
+                    "/context" => 2,
+                    "/diff" => 3,
+                    _ => 0,
+                });
+                None
+            }
+            _ if trimmed.starts_with('/') => {
+                self.message("Commands", "Unknown task command. /help lists commands; /exit returns to home settings. No provider request was sent.");
+                None
+            }
+            _ => {
+                self.awaiting_input = false;
+                Some(UiInput::Message(text))
+            }
+        }
+    }
     fn message(&mut self, role: &str, text: &str) {
         if text.is_empty() {
             return;
@@ -383,7 +424,7 @@ impl Screen {
                 let preview = task.lines().take(3).collect::<Vec<_>>().join("\n");
                 let preview: String = preview.chars().take(240).collect();
                 let preview = if preview != task {
-                    format!("{preview}…\nFull task: F2 → Activity → started → Enter")
+                    format!("{preview}…\nFull task: Ctrl+O → Activity → started → Enter")
                 } else {
                     preview
                 };
@@ -425,6 +466,10 @@ impl Screen {
                 self.message("Assistant", string(v, "message"));
                 self.stream.clear();
             }
+            "completed" => {
+                self.message("Assistant", string(v, "summary"));
+                self.stream.clear();
+            }
             "input_ready" => {
                 self.awaiting_input = true;
                 self.status = "Your turn".into();
@@ -455,6 +500,13 @@ impl Screen {
                     string(&v["artifact"], "hash").into(),
                     (v["artifact"]["bytes"].as_u64().unwrap_or(0), false),
                 );
+                if let Some(code) = v["exit_code"].as_i64() {
+                    self.message("Tool result", &if code == 0 {
+                        "Command exited successfully.".into()
+                    } else {
+                        format!("Command failed (exit {code}). Ctrl+O → Activity shows the captured output.")
+                    });
+                }
             }
             "context_evicted" => {
                 if let Some(ids) = v["artifacts"].as_array() {
@@ -792,7 +844,7 @@ impl Screen {
                 input_rows[0],
             );
             f.render_widget(
-                Paragraph::new("Enter Send · Shift-Enter New line · Esc Close · F2 Inspect")
+                Paragraph::new("Enter Send · /help · Esc Close · Ctrl+O Inspect")
                     .style(Style::default().fg(MUTED)),
                 input_rows[1],
             );
@@ -805,9 +857,9 @@ impl Screen {
             return;
         }
         let footer = if self.done {
-            "q Close · F2 Inspect · 1–4 Views\nPgUp/PgDn Scroll · text remains copyable"
+            "q Close · Ctrl+O / F2 Inspect · 1–4 Views\nPgUp/PgDn Scroll · text remains copyable"
         } else {
-            "F2 Inspect · 1–4 Views · Enter Details\nPgUp/PgDn Scroll · Esc / Ctrl-C Cancel"
+            "Ctrl+O / F2 Inspect · 1–4 Views · Enter Details\nPgUp/PgDn Scroll · Esc Back/Cancel · Ctrl-C Cancel"
         };
         f.render_widget(
             Paragraph::new(footer)
@@ -843,14 +895,15 @@ pub async fn terminal(
                 if let Event::Paste(text) = &event { if screen.awaiting_input { screen.editor.insert(text); } continue; }
                 let Event::Key(key) = event else { continue; };
                 if key.kind!=KeyEventKind::Press{continue;}
-                if key.code == KeyCode::F(2) { screen.inspect = !screen.inspect; screen.tab=0; screen.raw=false; continue; }
+                if key.code == KeyCode::F(2) || (key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL)) { screen.inspect = !screen.inspect; screen.tab=0; screen.raw=false; screen.scroll=0; continue; }
+                if screen.inspect && key.code == KeyCode::Esc { screen.inspect=false; screen.tab=0; screen.scroll=0; continue; }
                 if screen.awaiting_input && !screen.inspect {
                     match key.code {
                         KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => screen.editor.insert("\n"),
                         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => { screen.editor.take(); },
                         KeyCode::Esc => { let _=input.send(UiInput::Close); screen.awaiting_input=false; screen.closing=true; }
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => { let _=input.send(UiInput::Close); screen.awaiting_input=false; screen.closing=true; }
-                        KeyCode::Enter => { let text=screen.editor.take(); if !text.trim().is_empty() { if text.trim()=="/exit" { let _=input.send(UiInput::Close); screen.closing=true; } else { let _=input.send(UiInput::Message(text)); } screen.awaiting_input=false; } }
+                        KeyCode::Enter => { if let Some(message) = screen.submit_input() { let _=input.send(message); } }
                         KeyCode::PageUp => screen.scroll=screen.scroll.saturating_add(10),
                         KeyCode::PageDown => screen.scroll=screen.scroll.saturating_sub(10),
                         _ => screen.editor.key(key.code),
@@ -902,6 +955,41 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n")
     }
+    #[test]
+    fn completion_summary_and_local_commands_stay_in_the_conversation() {
+        let mut screen = Screen::default();
+        screen.receive(event(
+            "completed",
+            serde_json::json!({"summary":"Fixed input parsing; four checks passed."}),
+        ));
+        screen.receive(event("input_ready", serde_json::json!({})));
+        assert!(render(&mut screen, 70).contains("Fixed input parsing; four checks passed."));
+        for (command, tab) in [
+            ("/activity", 0),
+            ("/decisions", 1),
+            ("/context", 2),
+            ("/diff", 3),
+        ] {
+            screen.editor.insert(command);
+            assert!(screen.submit_input().is_none());
+            assert!(screen.awaiting_input && screen.inspect);
+            assert_eq!(screen.tab, tab);
+        }
+        screen.inspect = false;
+        for command in ["/help", "/provider claude"] {
+            screen.editor.insert(command);
+            assert!(screen.submit_input().is_none());
+            assert!(screen.awaiting_input);
+        }
+        screen
+            .editor
+            .insert("Add Unicode coverage\nKeep the API stable");
+        assert!(
+            matches!(screen.submit_input(), Some(UiInput::Message(text)) if text.contains('\n'))
+        );
+        assert!(!screen.awaiting_input);
+    }
+
     #[test]
     fn conversation_answers_do_not_render_a_failed_verification_summary() {
         let mut screen = Screen::default();

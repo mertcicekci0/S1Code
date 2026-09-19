@@ -6,6 +6,12 @@ and no cost, speed or task-quality superiority claim is established.
 
 ## Implemented
 
+- Task conversations display the final completion explanation and process exit
+  results. Ctrl+O opens the inspector without function keys; Esc returns to chat.
+  Follow-up `/help`, `/activity`, `/decisions`, `/context` and `/diff` are local
+  commands; unknown slash commands never consume inference. UI regressions and
+  the offline delegated-conversation PTY test cover this boundary.
+
 - Command hardening: unittest discovery checks directory existence, exclusions,
   ignore rules and symlinks before approval and again before spawning. Duplicate
   start-directory flags are denied. Unsupported-command feedback reaches planning.
