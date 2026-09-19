@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.0-rc.6 — Release hardening
+
+- Test-discovery paths obey exclusions, ignore rules and symlink restrictions,
+  including a check immediately before execution. Policy version 5 invalidates
+  earlier pending approvals. Rejected commands explain supported alternatives.
+- Recognized zero-test runs cannot verify a coding task, even with exit code zero.
+- Final explanations and command outcomes appear in the conversation. Ctrl+O
+  opens the inspector on keyboards without accessible function keys. Task-local
+  slash commands inspect history, decisions, context and diffs without inference.
+- `resume` defaults to the latest task in the current workspace and accepts unique
+  ID prefixes. Saved activity returns without replaying tools or old approvals.
+- `auth set/remove PROVIDER` and home `/auth PROVIDER` manage native API keys through
+  macOS Keychain with hidden input. Environment overrides remain supported; Linux
+  uses environment keys or a secret manager.
+- Source archives come from a clean committed tree after publication checks.
+  CI has read-only repository permissions and a separate dependency audit.
+
+Experimental source release candidate. No new paid provider validation or
+comparative performance claim is included in these changes.
+
 ## 0.3.0-rc.5 — Preference self-repair
 
 - Startup repairs the exact incomplete Claude model values an older, still-open

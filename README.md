@@ -1,7 +1,7 @@
 # S1Code
 
 A Rust terminal coding agent with concrete candidate actions, deterministic policy,
-and recoverable context. **Experimental 0.3.0-rc.2, built from source.** S1Code is a working
+and recoverable context. **Experimental 0.3.0-rc.6, built from source.** S1Code is a working
 name; naming availability and trademark clearance have not been established.
 
 Native mode owns the coding loop. A generation provider proposes plans and complete
@@ -17,8 +17,8 @@ S1Code's control. Jev has separate credentials and billing.
 ## Install from source
 
 Requires macOS or Linux, Git, Rust via rustup, and Python 3 for the included demo.
-The pinned toolchain is Rust 1.94.0. Windows is unsupported. Linux CI is configured
-but has not been observed running in this build session.
+The pinned toolchain is Rust 1.94.0. Windows is unsupported. CI is configured for macOS and Linux; the exact validation
+record is in [build status](docs/BUILD_STATUS.md).
 
 ```sh
 git clone https://github.com/mertcicekci0/S1Code.git

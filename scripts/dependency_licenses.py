@@ -16,7 +16,8 @@ for package in sorted(metadata['packages'],key=lambda p:(p['name'],p['version'])
     if package['id'] not in reachable or (package['name']=='s1code' and package['source'] is None): continue
     expression=package.get('license') or ''
     alternatives=expression.split(' OR ')
-    accepted=[part for part in alternatives if set(re.findall(r'[A-Za-z0-9.+-]+',part))-{'AND'} <= allowed]
+    accepted=[part for part in alternatives if part.strip() and
+              (terms := set(re.findall(r'[A-Za-z0-9.+-]+',part))-{'AND'}) and terms <= allowed]
     if not accepted:
         problems.append(f"Review {package['name']} {package['version']}: {expression or 'missing SPDX expression'}")
     root=pathlib.Path(package['manifest_path']).parent

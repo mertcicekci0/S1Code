@@ -1,11 +1,17 @@
 name: source checks
 on: [push, pull_request]
+permissions:
+  contents: read
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   check:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -15,3 +21,11 @@ jobs:
           components: rustfmt, clippy
       - run: scripts/check.sh
       - run: cargo run --locked -- eval --suite fixtures/core
+  dependency-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.94.0
+      - run: cargo install cargo-audit --locked --version 0.22.2
+      - run: scripts/audit.sh

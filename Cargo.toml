@@ -1,10 +1,12 @@
 [package]
 name = "s1code"
-version = "0.3.0-rc.5"
+version = "0.3.0-rc.6"
 edition = "2024"
 rust-version = "1.94"
 license = "Apache-2.0"
 description = "A terminal coding agent with bounded decisions and recoverable context"
+repository = "https://github.com/mertcicekci0/S1Code"
+readme = "README.md"
 publish = false
 
 [dependencies]

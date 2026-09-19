@@ -7,7 +7,7 @@ notice files into `target/notices/THIRD_PARTY_LICENSES.txt`. Include that bundle
 when redistributing a binary. Repeat the check for each distribution target.
 
 The 2026-09-19 local audit used cargo-audit 0.22.2 and RustSec database commit
-`2b34578f89884736e0fcbd42f7ba8d6b10b4a0ce` (updated 2026-09-18). The initial terminal
+`d5c17953a895cf19e8d3ce66eaa42b6fcfe1fb16` (updated 2026-09-19). The initial terminal
 dependency introduced unmaintained `paste` and soundness warnings in `lru 0.12.5`.
 Upgrading to Ratatui 0.30.2 removed `paste` and resolved `lru` to 0.18.4. The subsequent
 audit reported **zero vulnerabilities and zero warnings**. This is a dated check,
