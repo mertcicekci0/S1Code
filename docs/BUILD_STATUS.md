@@ -66,9 +66,9 @@ Local macOS ARM64 validation of rc.6 passed:
   Generated notice files remain under target/notices for binary redistribution.
 
 Hosted macOS/Linux checks and the dependency-audit job passed for source commit
-`e792ac9` ([run](https://github.com/mertcicekci0/S1Code/actions/runs/35437791111)).
-The subsequent CI-only maintenance pins the checkout action to a reviewed release
-commit, disables persisted checkout credentials and pins the Ubuntu runner label.
+`5b226c3` ([run](https://github.com/mertcicekci0/S1Code/actions/runs/35438113977)).
+CI pins the checkout action to a reviewed release commit, disables persisted
+checkout credentials and pins the Ubuntu runner label.
 
 The source/history scan has no pattern findings. This is not proof that arbitrary
 sensitive content is absent. The dated dependency audit is documented separately
@@ -76,9 +76,9 @@ in [dependency-audit.md](dependency-audit.md).
 
 ## Remaining limits and unverified paths
 
-- No new paid provider calls or comparative evaluation were run for rc.6. Earlier
-  provider acceptance records remain private. Mock contracts, demonstrations and
-  fixture reference patches do not establish live task success or efficiency.
+- Provider acceptance and live validation records remain private; public claims
+  here do not establish comparative performance. Mock contracts, demonstrations
+  and fixture reference patches do not establish live task success or efficiency.
 - Full live delegated Codex coding remains unverified. The supported local CLI is
   0.153.3; other versions stop with compatibility guidance. No internal generation
   call count, context ownership or subscription price is inferred from delegations.
