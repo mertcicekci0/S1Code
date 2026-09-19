@@ -384,7 +384,14 @@ impl Engine {
                         .execute(action, &self.store, &self.cancel)
                         .await;
                     match result {
-                        Ok(result) => {
+                        Ok(mut result) => {
+                            let empty_verification = matches!(action, Action::Run { argv, verification: true }
+                                if crate::tools::empty_test_run(argv, &result.text));
+                            if empty_verification {
+                                result.diagnostic = true;
+                                result.text.push_str("\nVerification rejected: no tests ran. Add or select relevant tests before finishing this task.\n");
+                                self.event("verification_rejected", json!({"reason":"No tests ran. A successful process exit alone does not verify this task."}))?;
+                            }
                             let bytes = self.store.redactor.text(&result.text).into_bytes();
                             let artifact = self.store.put(
                                 &bytes,
@@ -405,7 +412,10 @@ impl Engine {
                             } = action
                             {
                                 let after = self.workspace.revision()?;
-                                if result.exit_code == Some(0) && after == revision {
+                                if result.exit_code == Some(0)
+                                    && after == revision
+                                    && !empty_verification
+                                {
                                     self.session.verified = Some(Verification {
                                         argv: argv.clone(),
                                         revision: after,

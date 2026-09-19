@@ -643,6 +643,35 @@ pub fn bound(s: &str, max: usize) -> String {
     format!("{}\n[capture truncated at {max} bytes]", &s[..at])
 }
 
+/// Recognized empty-run summaries are negative verification evidence, even when
+/// a runner exits successfully. Unknown formats do not imply a test count.
+pub fn empty_test_run(argv: &[String], output: &str) -> bool {
+    let args: Vec<_> = argv.iter().map(String::as_str).collect();
+    let mut counts = output
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            let count = match args.as_slice() {
+                ["python3", "-m", "unittest", ..] => {
+                    let rest = line.strip_prefix("Ran ")?;
+                    let (count, rest) = rest.split_once(' ')?;
+                    (rest.starts_with("tests in ") || rest.starts_with("test in ")).then_some(count)
+                }
+                ["node", "--test"] => line
+                    .strip_prefix("# tests ")
+                    .or_else(|| line.strip_prefix("ℹ tests ")),
+                ["cargo", "test", ..] => line
+                    .strip_prefix("test result: ok. ")?
+                    .split_once(" passed;")
+                    .map(|(count, _)| count),
+                _ => None,
+            }?;
+            count.parse::<u64>().ok()
+        })
+        .peekable();
+    counts.peek().is_some() && counts.all(|count| count == 0)
+}
+
 pub fn clean_environment(cmd: &mut Command) {
     cmd.env_clear();
     for k in [

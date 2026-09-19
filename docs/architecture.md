@@ -59,7 +59,10 @@ Repository instructions cannot change policy or confer permissions.
 
 Completion requires a successful verification command for the current workspace
 revision and a generated completion proposal. Tests that mutate tracked working
-content invalidate verification. A passing check is evidence, not proof of full
+content invalidate verification. Recognized Python, Node and Cargo summaries that
+report zero executed tests cannot satisfy verification; `cargo check` is a compilation
+check and does not claim to run tests. Unknown runner output does not establish a test
+count. A passing check is evidence, not proof of full
 correctness; fixture evaluation separately runs protected assertions.
 Resume invalidates previous verification when the observed workspace has changed.
 

@@ -11,6 +11,128 @@ use std::{fs, sync::Arc};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+#[test]
+fn zero_test_summaries_cannot_stand_in_for_verification() {
+    use s1code::tools::empty_test_run;
+    let argv = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    for (args, empty, positive) in [
+        (
+            argv(&["python3", "-m", "unittest", "-v"]),
+            "Ran 0 tests in 0.000s\nOK",
+            "Ran 1 test in 0.001s\nOK",
+        ),
+        (
+            argv(&["node", "--test"]),
+            "# tests 0\n# fail 0",
+            "# tests 4\n# fail 0",
+        ),
+        (
+            argv(&["node", "--test"]),
+            "ℹ tests 0\nℹ fail 0",
+            "ℹ tests 4\nℹ fail 0",
+        ),
+        (
+            argv(&["cargo", "test", "--offline"]),
+            "test result: ok. 0 passed; 0 failed; 0 ignored;",
+            "test result: ok. 2 passed; 0 failed; 0 ignored;",
+        ),
+    ] {
+        assert!(empty_test_run(&args, empty));
+        assert!(!empty_test_run(&args, positive));
+        assert!(!empty_test_run(&args, &format!("{empty}\n{positive}")));
+        assert!(!empty_test_run(&args, "unrecognized output"));
+    }
+    assert!(!empty_test_run(
+        &argv(&["cargo", "check", "--offline"]),
+        "Finished dev profile"
+    ));
+}
+
+#[tokio::test]
+async fn successful_empty_unittest_run_does_not_complete_a_task() {
+    use async_trait::async_trait;
+    use s1code::generation::{GenerationResult, Generator};
+    use serde_json::Value;
+    struct EmptyCheck;
+    #[async_trait]
+    impl Generator for EmptyCheck {
+        fn simulated(&self) -> bool {
+            true
+        }
+        async fn generate(
+            &self,
+            input: Value,
+            _: &CancellationToken,
+            _: mpsc::UnboundedSender<String>,
+        ) -> anyhow::Result<GenerationResult> {
+            let tested = input["evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["action"]["type"] == "run");
+            let action = if tested {
+                assert!(input["verification"].is_null());
+                assert!(input.to_string().contains("Verification rejected"));
+                Action::Finish {
+                    summary: "Incorrectly claims an empty test suite is enough".into(),
+                }
+            } else {
+                Action::Run {
+                    argv: ["python3", "-m", "unittest", "-v"]
+                        .map(String::from)
+                        .to_vec(),
+                    verification: true,
+                }
+            };
+            Ok(GenerationResult {
+                proposal: Proposal {
+                    message: String::new(),
+                    actions: vec![action],
+                },
+                model: "offline fixture".into(),
+                usage: Usage::default(),
+            })
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let (store, session) = Store::create(
+        home.path(),
+        root.path(),
+        "verify".into(),
+        RunConfig {
+            auto_approve: true,
+            max_generations: 2,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let (events, mut rx) = mpsc::unbounded_channel();
+    let (_tx, input) = mpsc::unbounded_channel();
+    let result = Engine {
+        workspace: workspace_for(&session).unwrap(),
+        store,
+        session,
+        generator: Arc::new(EmptyCheck),
+        cancel: CancellationToken::new(),
+        events,
+        input,
+        interactive: false,
+        approved: None,
+    }
+    .run()
+    .await
+    .unwrap();
+    assert_ne!(result.status, RunStatus::Completed);
+    assert!(result.verified.is_none());
+    let mut rejected = false;
+    while let Some(event) = rx.recv().await {
+        rejected |= event.kind == "verification_rejected";
+        assert_ne!(event.kind, "completed");
+    }
+    assert!(rejected);
+}
+
 #[tokio::test]
 async fn test_discovery_validates_directory_again_before_execution() {
     let root = tempfile::tempdir().unwrap();

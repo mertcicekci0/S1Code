@@ -6,6 +6,10 @@ and no cost, speed or task-quality superiority claim is established.
 
 ## Implemented
 
+- Recognized zero-test summaries no longer satisfy completion. Actual empty
+  unittest execution and mixed Cargo/Node/Python summaries have regression coverage;
+  18 native integration tests pass. Compiler checks remain separately supported.
+
 - Workspace-scoped `resume` defaults to the latest saved task; unique ID prefixes
   and task previews make existing sessions findable. Native interactive resume
   restores recent activity for inspection without replaying tools or approvals.

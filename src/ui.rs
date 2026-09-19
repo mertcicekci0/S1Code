@@ -513,6 +513,7 @@ impl Screen {
                 self.message("Stopped", string(v, "message"))
             }
             "blocked" => self.message("Blocked", string(v, "reason")),
+            "verification_rejected" => self.message("Verification", string(v, "reason")),
             "candidates" => self.candidates = v.clone(),
             "selection" => self.selection = v.clone(),
             "tool_result" => {
