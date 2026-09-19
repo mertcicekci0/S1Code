@@ -1,0 +1,6 @@
+{
+  "name": "snake-comparison-starter",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test" }
+}

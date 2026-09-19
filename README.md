@@ -110,7 +110,10 @@ For an OpenRouter Jev key, use `OPENROUTER_API_KEY` and add
 with a checked serving build, not chat completions. Native generation still needs
 its selected provider API key (OpenAI or Anthropic). Managed ChatGPT login belongs to Codex bridge mode.
 
-Every native process and patch requires exact approval. Native execution is **not
+By default every native process and patch requires exact approval.
+For a trusted workspace, `run --auto-approve` (alias `--full-access`) grants
+session-wide consent for supported actions, retained on resume. Denied commands
+and paths remain denied; this is not unrestricted shell access. Native execution is **not
 an OS sandbox**: repository tests/build scripts execute code with your user's
 filesystem/network access. Use trusted repositories or your own sandbox.
 

@@ -34,7 +34,10 @@ This delegates execution to Codex; it does not enable native Jev selection.
 `--headless` emits only JSONL on stdout; diagnostics use stderr. Read an
 `approval_required` event, inspect its action/diff and candidate ID, then run
 `s1code resume ID --headless --approve CANDIDATE_ID`. A changed workspace invalidates
-that approval. One ID approves one action. There is no blanket native approval flag.
+that approval. One ID approves one action. For trusted native sessions, explicitly
+start with `--auto-approve` (alias `--full-access`) to preauthorize supported
+patches/tests. This setting persists on resume; policy denies and stale-action
+checks remain enforced. It does not enable arbitrary shell commands.
 
 `s1code sessions` lists IDs/statuses. `s1code resume ID` loads the recorded working
 set and validates current files. A cancelled process or incomplete patch is treated

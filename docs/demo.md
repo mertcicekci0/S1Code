@@ -95,3 +95,10 @@ The additional `python3 scripts/home_smoke.py` checks task entry and return, mis
 credentials, resize, and a clearly labeled process stub for the external handoff.
 These checks create disposable fixtures and authorize only their known demo actions.
 They exercise the labeled offline driver with real tools; neither uses a provider.
+
+## One-prompt Snake product comparison
+
+Use [the Snake comparison guide](snake-comparison.md) to prepare two identical
+starter commits and send the same prompt to official Claude Code and native S1Code.
+The launcher sends no provider requests until an arm is explicitly started. This
+is a product demonstration, not an isolated Jev benchmark.

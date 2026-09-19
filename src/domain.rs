@@ -145,6 +145,9 @@ pub struct Verification {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RunConfig {
+    /// Explicit user consent for supported native writes/processes; never overrides deny.
+    #[serde(default)]
+    pub auto_approve: bool,
     pub mode: Mode,
     pub decision: String,
     pub generation_model: String,
@@ -174,6 +177,7 @@ pub struct RunConfig {
 impl Default for RunConfig {
     fn default() -> Self {
         Self {
+            auto_approve: false,
             mode: Mode::Native,
             decision: "rules".into(),
             generation_model: "gpt-4.1-2025-04-14".into(),

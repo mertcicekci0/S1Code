@@ -12,6 +12,61 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
+async fn explicit_auto_approve_completes_real_tools_without_approval_prompts() {
+    let root = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    demo::fixture(root.path()).unwrap();
+    let (store, s) = Store::create(
+        home.path(),
+        root.path(),
+        demo::TASK.into(),
+        RunConfig {
+            offline_demo: true,
+            auto_approve: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let id = s.id.clone();
+    let (events, mut rx) = mpsc::unbounded_channel();
+    let (_input, inputs) = mpsc::unbounded_channel();
+    let engine = Engine {
+        workspace: workspace_for(&s).unwrap(),
+        generator: Arc::new(demo::OfflineDemo {
+            workspace: workspace_for(&s).unwrap(),
+        }),
+        store,
+        session: s,
+        cancel: CancellationToken::new(),
+        events,
+        input: inputs,
+        interactive: false,
+        approved: None,
+    };
+    let result = engine.run().await.unwrap();
+    assert_eq!(result.status, RunStatus::Completed);
+    assert_eq!(result.verified.unwrap().exit_code, 0);
+    let mut automatic = 0;
+    while let Some(event) = rx.recv().await {
+        assert_ne!(event.kind, "approval_required");
+        if event.kind == "auto_approved" {
+            automatic += 1;
+            assert!(event.data["candidate"]["id"].is_string());
+        }
+    }
+    assert_eq!(automatic, 3);
+    let (_, restored) = Store::resume(home.path(), &id).unwrap();
+    assert!(restored.config.auto_approve);
+    let mut legacy = serde_json::to_value(RunConfig::default()).unwrap();
+    legacy.as_object_mut().unwrap().remove("auto_approve");
+    assert!(
+        !serde_json::from_value::<RunConfig>(legacy)
+            .unwrap()
+            .auto_approve
+    );
+}
+
+#[tokio::test]
 async fn native_fixture_executes_patch_verification_and_persists() {
     let root = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();

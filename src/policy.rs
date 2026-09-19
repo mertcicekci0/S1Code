@@ -9,7 +9,7 @@ pub fn classify(action: &Action) -> PolicyClass {
     }
 }
 
-/// These commands still execute repository code and always require approval.
+/// These commands execute repository code and require manual or explicit session consent.
 pub fn valid_command(argv: &[String]) -> bool {
     if argv.iter().any(|s| s.contains('\0') || s.len() > 1024) {
         return false;
@@ -25,6 +25,7 @@ pub fn valid_command(argv: &[String]) -> bool {
         ["python3", "-m", "unittest", rest @ ..] => {
             rest.iter().all(|a| ["discover", "-v", "-q"].contains(a))
         }
+        ["node", "--test"] => true,
         _ => false,
     }
 }
@@ -70,4 +71,33 @@ pub fn revalidate(c: &CandidateAction, revision: &str) -> Result<()> {
         "candidate identity mismatch"
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn node_tests_require_approval_and_cannot_add_execution_flags() {
+        let action = Action::Run {
+            argv: vec!["node".into(), "--test".into()],
+            verification: true,
+        };
+        assert_eq!(classify(&action), PolicyClass::Ask);
+        for argv in [
+            vec!["node"],
+            vec!["node", "-e", "process.exit(0)"],
+            vec!["node", "--test", "--import", "module"],
+            vec!["node", "--test", "../outside.js"],
+            vec!["npm", "test"],
+        ] {
+            assert_eq!(
+                classify(&Action::Run {
+                    argv: argv.into_iter().map(String::from).collect(),
+                    verification: true
+                }),
+                PolicyClass::Deny
+            );
+        }
+    }
 }

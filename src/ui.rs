@@ -250,6 +250,7 @@ fn details(e: &RunEvent) -> String {
     match e.kind.as_str() {
         "started" => format!("Task\n{}\n\nNative execution · {} policy",string(v,"task"),string(v,"decision")),
         "approval_required" => approval_text(v),
+        "auto_approved" => format!("Automatically approved by explicit session setting\n{}", action_text(&v["candidate"]["action"])),
         "tool_started" => action_text(&v["candidate"]["action"]),
         "tool_result" => format!("Tool result{}\n\n{}", v["exit_code"].as_i64().map(|c|format!(" · exit {c}")).unwrap_or_default(),string(v,"content")),
         "proposal" => format!("{}\n\n{}",string(v,"message"),v["actions"].as_array().map(|xs|xs.iter().map(action_text).collect::<Vec<_>>().join("\n\n")).unwrap_or_default()),
@@ -420,6 +421,11 @@ impl Screen {
                 if !v["diff"].is_null() && v["kind"] != "command" {
                     self.diff = patch_text(&v["diff"]);
                     self.tab = 3;
+                }
+            }
+            "auto_approved" => {
+                if !v["diff"].is_null() {
+                    self.diff = patch_text(&v["diff"]);
                 }
             }
             "approved" | "denied" => {

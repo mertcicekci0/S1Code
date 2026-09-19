@@ -85,7 +85,7 @@ impl Engine {
             j.max_requests = self.session.config.max_provider_requests;
         }
         self.session.status = RunStatus::Running;
-        self.event("started",json!({"mode":"native","decision":self.session.config.decision,"decision_provider":self.session.config.jev_provider,"model":self.session.config.generation_model,"generation_provider":self.session.config.generation_provider,"simulation":self.session.config.offline_demo,"session":self.session.id,"task":self.session.task}))?;
+        self.event("started",json!({"mode":"native","decision":self.session.config.decision,"decision_provider":self.session.config.jev_provider,"model":self.session.config.generation_model,"generation_provider":self.session.config.generation_provider,"simulation":self.session.config.offline_demo,"auto_approve":self.session.config.auto_approve,"session":self.session.id,"task":self.session.task}))?;
         while self.session.steps < self.session.config.max_steps {
             if self.cancel.is_cancelled() {
                 self.session.status = RunStatus::Cancelled;
@@ -621,10 +621,21 @@ impl Engine {
         Ok(())
     }
     async fn approve(&mut self, c: &CandidateAction) -> Result<bool> {
+        policy::revalidate(c, &self.workspace.revision()?)?;
+        ensure!(!self.cancel.is_cancelled(), "cancelled before approval");
         if c.class == PolicyClass::Deny {
             bail!("policy denied action")
         }
         if c.class == PolicyClass::Allow {
+            return Ok(true);
+        }
+        if self.session.config.auto_approve {
+            let diff = if let Action::Patch { edits } = &c.action {
+                Some(self.workspace.diff(edits)?)
+            } else {
+                None
+            };
+            self.event("auto_approved", json!({"candidate":c,"diff":diff,"source":"explicit_session_auto_approve","scope":"Supported native actions only; denies and preconditions still enforced"}))?;
             return Ok(true);
         }
         self.session.pending = Some(c.clone());
@@ -735,6 +746,22 @@ mod selection_tests {
         assert_eq!(selected.id, read.id);
         assert_eq!(engine.session.metrics.decision_requests, 0);
         assert_eq!(engine.session.metrics.generative_calls, 0);
+        // Session-wide consent cannot elevate denied or stale actions.
+        engine.session.config.auto_approve = true;
+        let revision = engine.workspace.revision().unwrap();
+        let mut denied = policy::candidate(
+            Action::Run {
+                argv: vec!["sh".into(), "-c".into(), "true".into()],
+                verification: false,
+            },
+            &revision,
+            "fixture",
+            vec![],
+        );
+        assert!(engine.approve(&denied).await.is_err());
+        denied.class = PolicyClass::Ask;
+        assert!(engine.approve(&denied).await.is_err());
+        assert!(engine.approve(&read).await.is_err()); // Historical revision.
     }
     #[test]
     fn uncertain_patch_can_gather_untried_evidence_without_replanning() {

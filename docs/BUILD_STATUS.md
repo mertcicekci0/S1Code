@@ -18,7 +18,7 @@ and no cost, speed or task-quality superiority claim is established.
   gateway; version checks, question batching, exact cache, conservative token
   estimates, bounded retries and experimental confidence/retention policies.
 - Bounded reads/search, git status/diff, hash-bound whole-file patches with recovery,
-  approved Python unittest and offline Cargo checks, writer lock, process-group
+  approved Python unittest, Node.js tests and offline Cargo checks, writer lock, process-group
   cancellation, path/symlink/ignored-file protection and explicit exclusions.
 - Append-only events, atomic checkpoints, content-addressed artifacts, canonical
   call/result linkage, dependency closure, reversible eviction and exact rehydration.
@@ -44,11 +44,12 @@ and no cost, speed or task-quality superiority claim is established.
 
 ## Verification recorded locally
 
-- 49 offline Rust tests and eight Python launcher tests passed. Coverage includes
+- 51 offline Rust tests and 12 Python launcher/comparison tests passed. Coverage includes
   fragmented streams, invalid decisions, retries, stale candidates, policy bypass,
   traversal/symlinks, concurrent edits, patch recovery, pinned overflow, exact
   rehydration, dependency closure, cancellation, restart, duplicate bridge requests,
-  redaction, transactional compaction and stable-prefix preservation.
+  redaction, transactional compaction, stable-prefix preservation and explicit
+  automatic approval with real patch/test execution and preserved policy denies.
 - Formatting, all-target clippy with warnings denied and release build passed.
 - Real PTY parser demo completed with three approvals, resize at 50/110 columns,
   simulation label and terminal restoration. Headless approval/resume/export passed.
@@ -79,7 +80,7 @@ and no cost, speed or task-quality superiority claim is established.
   sandbox. Read allowlists and worktrees do not provide OS isolation. Native path
   exclusions cannot control upstream Codex internals.
 - Native tasks are bounded runs, not a full multi-turn coding chat. Only Python
-  unittest and offline Cargo test/check execute. No package installation, general
+  unittest, exact node --test and offline Cargo test/check execute. No package installation, general
   shell, deletion/rename/binary patch, swarms, daemon or local learned model.
 - Patches require existing parent directories. Multi-file updates are recoverable,
   not atomic as a set. Rehydration restores captured bytes, which may be historical
@@ -106,3 +107,24 @@ cargo run --locked --release --example context_probe
 Live checks require configured keys and a separately approved request budget.
 See providers.md, evaluation.md and demo.md. No published service benchmark,
 training dataset or model imitation is part of this release.
+
+## Snake comparison preparation
+
+A shared one-prompt Snake task and two identical starter repositories can be created
+with `python3 scripts/snake_compare.py prepare`. Official Claude Code uses managed
+auth; native S1Code reuses saved API credentials. Both receive the same prompt and
+requested model; tool/auth differences are recorded rather than hidden. No trial is
+automatically started. A private local preview serves each game on its own origin.
+Exact `node --test` is now an approval-required native command; extra Node arguments,
+script paths and npm remain denied. This executes trusted repository code without
+an OS sandbox. Policy version 2 invalidates old pending approvals; start a fresh
+task rather than reusing an approval from the earlier command policy. The generation
+contract was updated to advertise the supported command.
+
+Explicit native `--auto-approve` / `--full-access` now grants session-wide consent
+for supported patches/tests. Defaults and old stored sessions remain manual. It is
+visible in the terminal, recorded per candidate, persists on resume, and is rejected
+for the Codex bridge. Revalidation, denies and cancellation stay enforced. The
+offline real-tool regression completes the parser task without approval prompts and
+checks persisted consent; denied/tampered/stale candidates still fail. No paid Snake
+trial has been started by the preparation or verification scripts.

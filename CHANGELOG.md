@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Snake comparison and automatic approvals
+
+- Explicit native `--auto-approve` / `--full-access` grants consent for supported
+  actions, persists on resume, logs each exact candidate/diff and remains visible.
+  Denies, stale checks, path protections and cancellation remain enforced.
+- One shared prompt and identical Git starters for an interactive official Claude
+  Code versus native S1Code product demo; no model calls during preparation.
+- Private launch records, remembered native credentials and separate local preview
+  origins. Preview serves only game assets, not Git metadata or session records.
+- Approval-required `node --test` supports dependency-free JavaScript verification.
+  Extra Node flags, script execution and npm remain denied. Policy version 2
+  invalidates old pending approvals; a new task uses the expanded command policy.
+
 ## 0.3.0-rc.1
 
 Experimental source release candidate for macOS and Linux. No cost, speed or task

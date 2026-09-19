@@ -1,0 +1,7 @@
+Build a polished, playable Snake website from this starter. Complete the implementation, not just a plan.
+
+Use vanilla HTML, CSS and JavaScript, with no packages, CDN, external assets or backend. Give it a dark arcade style with a neon-green snake, a crisp square board, readable score/best-score cards and responsive desktop/mobile layouts.
+
+Gameplay: a 20×20 grid; start/restart; pause/resume with Space and a visible button; arrow keys and WASD; touch-friendly direction buttons. Prevent immediate reverse turns, including multiple key presses between ticks. Food must never appear on the snake. Eating grows the snake and adds 10 points. Wall/self collisions end the game. Restart resets the score, snake and movement timer. Persist the best score when localStorage is available, and keep playing if storage is unavailable. Arrow keys must not scroll the page while playing. Show concise controls and clear ready/paused/game-over states.
+
+Keep everything in root-level files: index.html, styles.css, game.js and game.test.js. Make the game rules testable without a browser. Replace the placeholder test with meaningful Node.js built-in tests for movement, reversal prevention, eating/growth, collision and restart; run node --test and fix failures. Don't install dependencies, commit or push. Finish with a short summary of what you built, what you actually tested, and any remaining limitations.

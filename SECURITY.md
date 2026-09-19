@@ -1,7 +1,7 @@
 # Security
 
 Native process execution is not an operating-system sandbox. Cargo tests/build
-scripts and Python tests are arbitrary repository code, executed with the user's
+scripts, Python tests and Node.js tests are arbitrary repository code, executed with the user's
 filesystem and network access after explicit approval. Use trusted repositories,
 disposable workspaces, or an external sandbox. An allowlist, file hashes and a Git
 worktree do not provide OS isolation. macOS/Linux process groups support cancellation;
@@ -9,11 +9,12 @@ a deliberately daemonizing process can escape a process group. No memory/contain
 isolation is claimed.
 
 Model outputs and repository instructions are untrusted data. Native deterministic
-policy is allow/ask/deny. Models cannot change it. Every patch/process requires an
-approval bound to complete arguments, policy version, workspace identity and file
+policy is allow/ask/deny. Models cannot change it. By default, each patch/process requires an
+interactive approval bound to complete arguments, policy version, workspace identity and file
 snapshot. There is no automatic commit, push, install, destructive shell, or shell
-interpolation tool. The small process set currently supports offline Cargo test/check
-and Python unittest. Broader ecosystems are not supported in v0.
+interpolation tool. The small process set currently supports offline Cargo test/check,
+Python unittest and exact `node --test`. Node flags, script paths, npm, package
+installation and arbitrary shell commands remain unsupported.
 
 Native paths reject traversal, absolute paths, symlinks, dotfiles, ignored paths,
 common credential names and explicit exclusions. Root `AGENTS.md` can guide coding
@@ -51,3 +52,11 @@ failure. Unsupported protocol versions stop with a diagnostic.
 No private vulnerability inbox has been established. Do not post credentials or
 exploit details in public issues; arrange a private reporting channel with the
 repository maintainer before sharing sensitive material.
+
+Native `run --auto-approve` (alias `--full-access`) is explicit session-wide consent
+for supported patches and commands. It suppresses approval prompts, not policy
+denies, path protections, stale checks, request caps or cancellation. It is persisted
+with the session and remains active on resume; new sessions default to manual
+approval. Each automatic approval records the exact candidate and patch diff. This
+is not unrestricted shell/filesystem access and is rejected in Codex bridge mode.
+Use it only with trusted repository code; commands have no OS sandbox.

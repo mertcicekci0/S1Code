@@ -26,6 +26,9 @@ struct Cli {
 #[derive(Args, Clone)]
 struct RunArgs {
     task: String,
+    /// Auto-approve supported native actions. Denied commands/paths remain denied; no OS sandbox.
+    #[arg(long, visible_alias = "full-access")]
+    auto_approve: bool,
     #[arg(long, default_value = ".")]
     workspace: PathBuf,
     #[arg(long,default_value="native",value_parser=["native","codex"])]
@@ -185,6 +188,10 @@ async fn execute(cmd: Commands, home: PathBuf) -> Result<()> {
         Commands::Run(a) => {
             ensure!(!a.task.trim().is_empty(), "task cannot be empty");
             ensure!(
+                !a.auto_approve || a.mode == "native",
+                "--auto-approve/--full-access is native-only; Codex manages its own permissions"
+            );
+            ensure!(
                 a.mode != "codex"
                     || (a.decision == "rules"
                         && a.eviction != "jev"
@@ -199,6 +206,7 @@ async fn execute(cmd: Commands, home: PathBuf) -> Result<()> {
                 "experimental decision thresholds must be finite values in 0..1"
             );
             let config = RunConfig {
+                auto_approve: a.auto_approve,
                 mode: if a.mode == "codex" {
                     Mode::Codex
                 } else {
@@ -461,6 +469,7 @@ async fn execute(cmd: Commands, home: PathBuf) -> Result<()> {
 fn home_run(task: String, settings: &s1code::home::Settings) -> RunArgs {
     let delegated = settings.provider == "codex";
     RunArgs {
+        auto_approve: false,
         task,
         workspace: settings.workspace.clone(),
         mode: if delegated { "codex" } else { "native" }.into(),
@@ -629,7 +638,7 @@ async fn drive(
         signal.cancel();
     });
     let interactive = !headless && io::stdin().is_terminal() && io::stdout().is_terminal();
-    let label = if s.config.offline_demo {
+    let mut label = if s.config.offline_demo {
         "OFFLINE SIMULATION · real tools · no model calls".into()
     } else {
         format!(
@@ -644,6 +653,9 @@ async fn drive(
             }
         )
     };
+    if s.config.auto_approve {
+        label.push_str(" · AUTO APPROVE (supported actions)");
+    }
     let engine = Engine {
         workspace: workspace_for(&s)?,
         store,

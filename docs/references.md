@@ -80,3 +80,10 @@ Read the official [Claude prompt-caching contract](https://platform.claude.com/d
 explicit content-block breakpoints, five-minute lifetime, prefix invalidation,
 minimum cacheable lengths and separate cache-read/cache-write usage. Native prefix
 packing and transactional artifact eviction were independently authored (ADR 006).
+
+Snake comparison follow-up: installed Node.js v22.12.0 `--help` and an actual
+`node --test` starter failure verified built-in test execution; no npm dependency
+or runtime implementation was copied. Installed Claude Code 2.1.266 help and the
+official [CLI reference](https://code.claude.com/docs/en/cli-reference) verified
+managed interactive startup, explicit model, safe mode and strict MCP configuration.
+No Claude credentials were inspected; no provider was called during preparation.
