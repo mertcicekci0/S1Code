@@ -26,6 +26,10 @@ struct Cli {
 #[derive(Args, Clone)]
 struct RunArgs {
     task: String,
+    #[arg(long, default_value_t = 16384, value_parser = clap::value_parser!(u32).range(1024..=65536))]
+    max_output_tokens: u32,
+    #[arg(long, value_parser = ["low", "medium", "high", "xhigh", "max"])]
+    effort: Option<String>,
     /// Auto-approve supported native actions. Denied commands/paths remain denied; no OS sandbox.
     #[arg(long, visible_alias = "full-access")]
     auto_approve: bool,
@@ -196,7 +200,9 @@ async fn execute(cmd: Commands, home: PathBuf) -> Result<()> {
                     || (a.decision == "rules"
                         && a.eviction != "jev"
                         && a.jev_provider == "typesafe"
-                        && a.provider == "openai"),
+                        && a.provider == "openai"
+                        && a.effort.is_none()
+                        && a.max_output_tokens == s1code::domain::default_output_limit()),
                 "Codex owns generation, tool selection and context in bridge mode. Native Claude/Jev options cannot be applied there; select --mode native instead."
             );
             ensure!(
@@ -207,6 +213,8 @@ async fn execute(cmd: Commands, home: PathBuf) -> Result<()> {
             );
             let config = RunConfig {
                 auto_approve: a.auto_approve,
+                max_output_tokens: a.max_output_tokens,
+                generation_effort: a.effort,
                 mode: if a.mode == "codex" {
                     Mode::Codex
                 } else {
@@ -470,6 +478,8 @@ fn home_run(task: String, settings: &s1code::home::Settings) -> RunArgs {
     let delegated = settings.provider == "codex";
     RunArgs {
         auto_approve: settings.auto_approve && !delegated,
+        max_output_tokens: settings.max_output_tokens,
+        effort: settings.effort.clone(),
         task,
         workspace: settings.workspace.clone(),
         mode: if delegated { "codex" } else { "native" }.into(),

@@ -146,3 +146,13 @@ paste preserves newlines, tool progress/recovery are readable and empty assistan
 sections are hidden. The previously failed live Snake trace did not retain its stop
 reason, so its root cause cannot be established retrospectively. A successful live
 Snake build remains unverified; offline recovery tests are not a live success claim.
+
+Native execution milestone: Claude client-tool proposals replace the nullable
+text-output envelope on outgoing requests. Fragmented tool JSON is collected and
+validated only after a complete terminal event; runtime still owns all execution.
+Output limits are configurable and Opus/Sonnet 5 use explicit medium effort by
+default. Reported reasoning usage is recorded as a subset of output. Empty workspace
+searches are skipped, and rejected candidate diagnostics reach subsequent planning.
+Provider integration tests (17), library tests (17) and all-target clippy passed.
+The local HTTP fixture performs a real patch and verification with streamed tool
+calls. This is not a successful live Snake run; live acceptance remains outstanding.

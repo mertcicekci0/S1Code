@@ -391,6 +391,7 @@ impl Jev {
                         let parsed: DecisionResponse =
                             serde_json::from_slice(&body).context("invalid typed Jev response")?;
                         metrics.usage.push(Usage {
+                            reasoning_tokens: None,
                             input_tokens: Some(parsed.usage.input_tokens),
                             output_tokens: Some(parsed.usage.output_tokens),
                             cached_input_tokens: None,

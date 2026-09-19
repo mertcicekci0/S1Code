@@ -376,7 +376,7 @@ impl Screen {
             "stream" => {
                 self.stream.push_str(string(v, "delta"));
                 self.stream = crate::tools::bound(&self.stream, 512 * 1024);
-                self.upstream_stream = false;
+                self.upstream_stream = v["plain_text"].as_bool().unwrap_or(false);
                 return;
             }
             "generation_requested" => {

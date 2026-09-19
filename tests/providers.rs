@@ -395,13 +395,21 @@ async fn claude_stream_contract_usage_and_hidden_content() {
     assert!(!requests[0].contains("authorization:"));
     let body: serde_json::Value =
         serde_json::from_str(requests[0].split_once("\r\n\r\n").unwrap().1).unwrap();
-    assert_eq!(body["output_config"]["format"]["type"], "json_schema");
+    assert!(body["output_config"]["format"].is_null());
+    assert_eq!(body["max_tokens"], 16384);
+    assert_eq!(body["tool_choice"]["disable_parallel_tool_use"], true);
     assert_eq!(body["stream"], true);
     assert_eq!(
         body["messages"][0]["content"][0]["cache_control"]["type"],
         "ephemeral"
     );
-    assert!(body.get("tools").is_none());
+    assert!(
+        body["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["name"] == "patch")
+    );
     assert!(
         !body["output_config"]["format"]["schema"]
             .to_string()
@@ -522,35 +530,7 @@ async fn claude_http_fixture_drives_native_patch_and_real_verification() {
     ];
     let bodies = actions
         .iter()
-        .map(|a| {
-            let kind = a["type"].as_str().unwrap();
-            let mut payload = a.as_object().unwrap().clone();
-            payload.remove("type");
-            let mut a = json!({"type":kind});
-            for name in [
-                "read",
-                "search",
-                "patch",
-                "run",
-                "rehydrate",
-                "blocked",
-                "finish",
-            ] {
-                a[name] = if name == kind {
-                    json!(payload)
-                } else {
-                    serde_json::Value::Null
-                };
-            }
-            (
-                200,
-                claude_wire(claude_events(
-                    &json!({"message":"Local protocol fixture; not live inference","actions":[a]})
-                        .to_string(),
-                    "end_turn",
-                )),
-            )
-        })
+        .map(|a| (200, claude_wire(claude_tool_events(a.clone(), "tool_use"))))
         .collect();
     let (url, server) = mock(bodies).await;
     let config = RunConfig {
@@ -649,4 +629,103 @@ async fn claude_terminal_failures_keep_reason_and_usage_without_partial_proposal
         assert!(!error.to_string().contains("{incomplete"));
         assert_eq!(server.await.unwrap().len(), 1); // Adapter never hides another request.
     }
+}
+
+fn claude_tool_events(action: serde_json::Value, stop: &str) -> Vec<serde_json::Value> {
+    let mut arguments = action.as_object().unwrap().clone();
+    let name = arguments.remove("type").unwrap();
+    let input = serde_json::to_string(&arguments).unwrap();
+    let mut events = vec![
+        json!({"type":"message_start","message":{"model":"claude-fixture","content":[],"usage":{"input_tokens":30,"output_tokens":0}}}),
+        json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
+        json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Preparing the next action."}}),
+        json!({"type":"content_block_stop","index":0}),
+        json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tool_fixture","name":name,"input":{}}}),
+    ];
+    for c in input.chars() {
+        events.push(json!({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":c.to_string()}}));
+    }
+    events.extend([
+        json!({"type":"content_block_stop","index":1}),
+        json!({"type":"message_delta","delta":{"stop_reason":stop},"usage":{"output_tokens":42,"output_tokens_details":{"thinking_tokens":12}}}),
+        json!({"type":"message_stop"}),
+    ]);
+    events
+}
+
+#[tokio::test]
+async fn claude_client_tool_stream_proposes_without_executing_and_counts_reasoning() {
+    let action =
+        json!({"type":"patch","edits":[{"path":"new.js","before_hash":null,"content":"// çığ\n"}]});
+    let (url, server) = mock(vec![(
+        200,
+        claude_wire(claude_tool_events(action.clone(), "tool_use")),
+    )])
+    .await;
+    let generator = s1code::claude::Claude::new("fixture-key".into(), "claude-opus-5", &url)
+        .unwrap()
+        .configure(24576, Some("medium".into()))
+        .unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let result = generator
+        .generate(json!({}), &CancellationToken::new(), tx)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&result.proposal.actions[0]).unwrap(),
+        action
+    );
+    assert_eq!(result.usage.output_tokens, Some(42));
+    assert_eq!(result.usage.reasoning_tokens, Some(12));
+    assert_eq!(rx.recv().await.unwrap(), "");
+    assert_eq!(rx.recv().await.unwrap(), "Preparing the next action.");
+    assert!(rx.recv().await.is_none());
+    let requests = server.await.unwrap();
+    let body: serde_json::Value =
+        serde_json::from_str(requests[0].split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(body["max_tokens"], 24576);
+    assert_eq!(body["output_config"]["effort"], "medium");
+    assert!(body["output_config"]["format"].is_null());
+}
+
+#[tokio::test]
+async fn claude_rejects_unknown_tools_bad_arguments_and_truncated_tool_inputs() {
+    for action in [
+        json!({"type":"shell","command":"echo bad"}),
+        json!({"type":"read","path":"a","start":"bad","lines":3}),
+    ] {
+        let (url, server) = mock(vec![(
+            200,
+            claude_wire(claude_tool_events(action, "tool_use")),
+        )])
+        .await;
+        let provider =
+            s1code::claude::Claude::new("fixture".into(), "claude-fixture", &url).unwrap();
+        let (tx, _) = mpsc::unbounded_channel();
+        assert!(
+            provider
+                .generate(json!({}), &CancellationToken::new(), tx)
+                .await
+                .is_err()
+        );
+        server.await.unwrap();
+    }
+    let mut events = claude_tool_events(json!({"type":"list"}), "max_tokens");
+    events.remove(6); // Truncated JSON: only the opening brace is delivered.
+    let (url, server) = mock(vec![(200, claude_wire(events))]).await;
+    let provider = s1code::claude::Claude::new("fixture".into(), "claude-fixture", &url).unwrap();
+    let (tx, _) = mpsc::unbounded_channel();
+    let error = provider
+        .generate(json!({}), &CancellationToken::new(), tx)
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(
+        error
+            .downcast_ref::<s1code::claude::IncompleteResponse>()
+            .unwrap()
+            .reason,
+        "max_tokens"
+    );
+    server.await.unwrap();
 }

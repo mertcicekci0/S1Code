@@ -260,3 +260,11 @@ planning permits at most one retry asking for one smaller action, inside the sam
 request/generation caps; usage from both completed responses is counted. Refusals,
 unknown stop reasons and transport-truncated streams do not trigger that retry.
 Partial proposals are discarded, never executed or joined to later JSON.
+
+Native Claude uses public client-tool proposals, not a schema-constrained text
+packet with nullable arguments for every action. S1Code executes selected tools.
+`--max-output-tokens 16384` controls the output ceiling; `/output-limit 16384` sets
+it in the home screen. `--effort medium` or `/effort medium` selects Claude effort;
+Opus 5 and Sonnet 5 default to medium. Other models retain provider defaults, and
+unsupported explicit levels may be rejected by that provider. Thinking shares the
+output ceiling; its reported token count is a subset, not an extra total.

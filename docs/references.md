@@ -93,3 +93,11 @@ No Claude credentials were inspected; no provider was called during preparation.
   https://platform.claude.com/docs/en/build-with-claude/structured-outputs consulted
   2026-09-19. Applied distinct terminal diagnostics and bounded max_tokens recovery;
   no source code copied.
+
+2026-09-19 native client-tool follow-up: official Claude documentation for
+[defining tools](https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools),
+[thinking](https://platform.claude.com/docs/en/build-with-claude/thinking) and
+[effort steering](https://platform.claude.com/docs/en/build-with-claude/thinking-steering-and-cost).
+Reviewed tool input schemas, streamed JSON fragments, default thinking behavior,
+effort configuration and final usage breakdown. Independently authored adapter;
+no third-party implementation reused.

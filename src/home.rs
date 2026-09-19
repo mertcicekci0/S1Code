@@ -19,11 +19,13 @@ use std::{io, path::PathBuf};
 
 const ACCENT: Color = Color::Rgb(111, 211, 194);
 const MUTED: Color = Color::Rgb(151, 163, 177);
-pub const HELP: &str = "/provider codex|openai|claude  /model MODEL  /decision rules|jev|generative\n/jev openrouter|typesafe  /workspace PATH  /permissions manual|full-access  /login  /account  /sessions\n/resume ID  /continue ID (Codex)  /demo  /claude-code  /help  /exit\nNative keys: OPENAI_API_KEY or ANTHROPIC_API_KEY; Jev: OPENROUTER_API_KEY or TYPESAFE_API_KEY. Set keys in the environment, never in this prompt.";
+pub const HELP: &str = "/provider codex|openai|claude  /model MODEL  /effort LEVEL  /output-limit TOKENS  /decision rules|jev|generative\n/jev openrouter|typesafe  /workspace PATH  /permissions manual|full-access  /login  /account  /sessions\n/resume ID  /continue ID (Codex)  /demo  /claude-code  /help  /exit\nNative keys: OPENAI_API_KEY or ANTHROPIC_API_KEY; Jev: OPENROUTER_API_KEY or TYPESAFE_API_KEY. Set keys in the environment, never in this prompt.";
 
 #[derive(Clone)]
 pub struct Settings {
     pub auto_approve: bool,
+    pub max_output_tokens: u32,
+    pub effort: Option<String>,
     pub provider: String,
     pub model: Option<String>,
     pub decision: String,
@@ -34,6 +36,8 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             auto_approve: false,
+            max_output_tokens: crate::domain::default_output_limit(),
+            effort: None,
             provider: "codex".into(),
             model: None,
             decision: "rules".into(),
@@ -151,6 +155,7 @@ pub fn interpret(line: &str, settings: &mut Settings) -> Result<Option<Command>>
             settings.provider = args.into();
             settings.auto_approve = false;
             settings.model = None;
+            settings.effort = None;
         }
         "/model" => {
             ensure!(
@@ -178,6 +183,29 @@ pub fn interpret(line: &str, settings: &mut Settings) -> Result<Option<Command>>
                 settings.jev_provider = args.into();
                 settings.decision = "jev".into();
             }
+        }
+        "/effort" => {
+            ensure!(
+                settings.provider == "claude",
+                "Effort is currently available for native Claude"
+            );
+            ensure!(
+                ["low", "medium", "high", "xhigh", "max", "default"].contains(&args),
+                "Use /effort low|medium|high|xhigh|max|default"
+            );
+            settings.effort = if args == "default" {
+                None
+            } else {
+                Some(args.into())
+            };
+        }
+        "/output-limit" => {
+            let limit: u32 = args.parse().context("Use /output-limit 16384")?;
+            ensure!(
+                (1024..=65536).contains(&limit),
+                "Output limit must be 1024..65536"
+            );
+            settings.max_output_tokens = limit;
         }
         "/permissions" => {
             ensure!(

@@ -55,6 +55,8 @@ pub struct Claude {
     key: String,
     model: String,
     endpoint: String,
+    max_output_tokens: u32,
+    effort: Option<String>,
 }
 impl Claude {
     pub fn from_env(model: &str) -> Result<Self> {
@@ -75,10 +77,39 @@ impl Claude {
             key,
             model: model.into(),
             endpoint: endpoint.into(),
+            max_output_tokens: crate::domain::default_output_limit(),
+            effort: if model.starts_with("claude-opus-5") || model.starts_with("claude-sonnet-5") {
+                Some("medium".into())
+            } else {
+                None
+            },
         })
+    }
+    pub fn configure(mut self, max_output_tokens: u32, effort: Option<String>) -> Result<Self> {
+        ensure!(
+            (1024..=65536).contains(&max_output_tokens),
+            "output token limit must be 1024..65536"
+        );
+        if let Some(effort) = effort {
+            ensure!(
+                ["low", "medium", "high", "xhigh", "max"].contains(&effort.as_str()),
+                "invalid Claude effort"
+            );
+            self.effort = Some(effort);
+        }
+        self.max_output_tokens = max_output_tokens;
+        Ok(self)
+    }
+    fn request(&self, input: Value) -> Value {
+        let mut body = json!({"model":self.model,"system":format!("{} Use the provided client tools to propose the next action. These tools do not execute on the provider: S1Code validates, selects and executes locally. Emit exactly one tool call for the next step and brief ordinary text if helpful. Do not wrap calls in JSON prose or fill unrelated arguments. Tool names select the action type; input contains only arguments declared in that tool input_schema.", INSTRUCTIONS),"messages":[{"role":"user","content":content_blocks(input)}],"stream":true,"max_tokens":self.max_output_tokens,"tools":action_tools(),"tool_choice":{"type":"auto","disable_parallel_tool_use":true}});
+        if let Some(effort) = &self.effort {
+            body["output_config"] = json!({"effort":effort});
+        }
+        body
     }
 }
 
+#[cfg(test)]
 fn schema() -> Value {
     fn visit(value: &mut Value) {
         match value {
@@ -123,6 +154,58 @@ fn schema() -> Value {
     let required: Vec<_> = properties.keys().cloned().collect();
     result["properties"]["actions"]["items"] = json!({"type":"object","properties":properties,"required":required,"additionalProperties":false});
     result
+}
+
+fn action_tools() -> Vec<Value> {
+    proposal_schema()["properties"]["actions"]["items"]["anyOf"]
+        .as_array().unwrap().iter().filter_map(|variant| {
+            let kind = variant["properties"]["type"]["enum"][0].as_str().unwrap();
+            if kind == "ask_generator" { return None; }
+            let mut input = variant.clone();
+            input["properties"].as_object_mut().unwrap().remove("type");
+            input["required"].as_array_mut().unwrap().retain(|v| v != "type");
+            let purpose = match kind {
+                "read" => "Read existing UTF-8 file lines and its exact hash before editing. At most 300 lines.",
+                "patch" => "Propose complete replacement content for one file. Use the exact observed before_hash; null creates a new file. This does not apply immediately: runtime policy and consent are enforced.",
+                "run" => "Propose a supported test command with exact argv and verification=true. Runtime controls execution and permissions.",
+                "finish" => "Finish only after real current verification passes and all requested files/features are present. Never finish a partial task.",
+                "blocked" => "Explain a concrete limitation only when evidence gathering or a supported action cannot resolve it.",
+                "search" => "Find a literal identifier in repository text, with bounded results.",
+                "rehydrate" => "Recover an evicted artifact's exact bytes without rerunning the historical action.",
+                "list" => "List bounded repository files.",
+                _ => "Inspect repository git status and diff without changing git state.",
+            };
+            Some(json!({"name":kind,"description":purpose,"input_schema":input}))
+        }).collect()
+}
+
+struct ToolInput {
+    id: String,
+    name: String,
+    initial: Value,
+    json: String,
+}
+impl ToolInput {
+    fn action(self) -> Result<crate::domain::Action> {
+        let mut value = if self.json.is_empty() {
+            self.initial
+        } else {
+            ensure!(
+                self.initial.as_object().is_some_and(|o| o.is_empty()),
+                "mixed initial and streamed tool input"
+            );
+            serde_json::from_str(&self.json).context("incomplete Claude tool input")?
+        };
+        let object = value
+            .as_object_mut()
+            .context("Claude tool input must be an object")?;
+        ensure!(
+            !object.contains_key("type"),
+            "tool input cannot override its action type"
+        );
+        object.insert("type".into(), json!(self.name));
+        serde_json::from_value(value).context("invalid Claude tool arguments")
+    }
 }
 
 fn decode_proposal(text: &str) -> Result<crate::domain::Proposal> {
@@ -227,6 +310,8 @@ struct Message {
     stop_reason: Option<String>,
     block: Option<(u64, bool)>,
     next_index: u64,
+    tool: Option<ToolInput>,
+    tools: Vec<ToolInput>,
     text: String,
     model: String,
     usage: Usage,
@@ -257,6 +342,7 @@ impl Message {
                     .into();
                 let u = &event["message"]["usage"];
                 self.usage = Usage {
+                    reasoning_tokens: None,
                     input_tokens: u["input_tokens"].as_u64(),
                     output_tokens: u["output_tokens"].as_u64(),
                     cached_input_tokens: u["cache_read_input_tokens"].as_u64(),
@@ -276,6 +362,26 @@ impl Message {
                 let text = match block["type"].as_str() {
                     Some("text") => true,
                     Some("thinking" | "redacted_thinking") => false,
+                    Some("tool_use") => {
+                        let name = block["name"].as_str().context("tool name missing")?;
+                        ensure!(
+                            action_tools().iter().any(|t| t["name"] == name),
+                            "unknown native tool proposal"
+                        );
+                        let id = block["id"].as_str().context("tool ID missing")?;
+                        ensure!(
+                            !id.is_empty() && !self.tools.iter().any(|t| t.id == id),
+                            "duplicate or empty tool ID"
+                        );
+                        ensure!(self.tools.len() < 4, "too many proposed tools");
+                        self.tool = Some(ToolInput {
+                            id: id.into(),
+                            name: name.into(),
+                            initial: block["input"].clone(),
+                            json: String::new(),
+                        });
+                        false
+                    }
                     _ => bail!(
                         "unsupported Claude content; native generation cannot execute upstream tools"
                     ),
@@ -307,6 +413,19 @@ impl Message {
                             .context("Claude text delta missing")?,
                         deltas,
                     )?;
+                } else if let Some(tool) = &mut self.tool {
+                    ensure!(
+                        event["delta"]["type"] == "input_json_delta",
+                        "unexpected tool input delta"
+                    );
+                    let part = event["delta"]["partial_json"]
+                        .as_str()
+                        .context("tool input fragment missing")?;
+                    ensure!(
+                        tool.json.len() + part.len() <= 512 * 1024,
+                        "tool input exceeds byte limit"
+                    );
+                    tool.json.push_str(part);
                 } // Thinking and signatures are never displayed or persisted.
             }
             "content_block_stop" => {
@@ -315,6 +434,9 @@ impl Message {
                     event["index"].as_u64() == Some(index),
                     "Claude stop index mismatch"
                 );
+                if let Some(tool) = self.tool.take() {
+                    self.tools.push(tool);
+                }
                 self.next_index += 1;
             }
             "message_delta" => {
@@ -342,6 +464,10 @@ impl Message {
                     );
                     self.ended = true;
                 }
+                if let Some(n) = event["usage"]["output_tokens_details"]["thinking_tokens"].as_u64()
+                {
+                    self.usage.reasoning_tokens = Some(n);
+                }
                 if let Some(n) = event["usage"]["output_tokens"].as_u64() {
                     self.usage.output_tokens = Some(n);
                 }
@@ -368,14 +494,34 @@ impl Message {
     }
     fn finish(self) -> Result<GenerationResult> {
         ensure!(self.stopped, "Claude stream ended without message_stop");
-        if self.stop_reason.as_deref() != Some("end_turn") {
+        if !matches!(self.stop_reason.as_deref(), Some("end_turn" | "tool_use")) {
             return Err(IncompleteResponse {
                 reason: self.stop_reason.unwrap_or_else(|| "unknown".into()),
                 usage: self.usage,
             }
             .into());
         }
-        let proposal = decode_proposal(&self.text)?;
+        let proposal = if self.stop_reason.as_deref() == Some("tool_use") {
+            ensure!(
+                !self.tools.is_empty(),
+                "tool_use completion without tool proposals"
+            );
+            crate::domain::Proposal {
+                message: self.text,
+                actions: self
+                    .tools
+                    .into_iter()
+                    .map(ToolInput::action)
+                    .collect::<Result<Vec<_>>>()?,
+            }
+        } else {
+            ensure!(
+                self.tools.is_empty(),
+                "tool proposals without tool_use completion"
+            );
+            // Explicit legacy JSON responses remain accepted, never prose-parsed actions.
+            decode_proposal(&self.text)?
+        };
         validate(&proposal)?;
         Ok(GenerationResult {
             proposal,
@@ -387,6 +533,9 @@ impl Message {
 
 #[async_trait]
 impl Generator for Claude {
+    fn streams_plain_text(&self) -> bool {
+        true
+    }
     async fn generate(
         &self,
         input: Value,
@@ -394,7 +543,7 @@ impl Generator for Claude {
         deltas: mpsc::UnboundedSender<String>,
     ) -> Result<GenerationResult> {
         ensure!(!cancel.is_cancelled(), "generation cancelled");
-        let body = json!({"model":self.model,"system":format!("{INSTRUCTIONS} Wire format: each action has type plus named payloads read/search/patch/run/rehydrate/blocked/finish. Put arguments inside the payload matching type; all other payloads must be null. Example: type=read with read={{path:relative/path,start:1,lines:100}}. Keep explanations in the top-level message, never in another payload. Never substitute an argument-free action for a read, search, patch or run."),"messages":[{"role":"user","content":content_blocks(input)}],"stream":true,"max_tokens":8192,"output_config":{"format":{"type":"json_schema","schema":schema()}}});
+        let body = self.request(input);
         let response = tokio::select! {biased; _=cancel.cancelled()=>bail!("generation cancelled"), r=self.client.post(&self.endpoint).header("x-api-key", &self.key).header("anthropic-version", "2023-06-01").json(&body).send()=>r.context("Claude transport failed")?};
         if !response.status().is_success() {
             let status = response.status();

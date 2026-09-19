@@ -162,6 +162,15 @@ impl Engine {
                         }
                         self.event("generation_requested",json!({"purpose":"plan_or_propose_next_action","simulated":self.generator.simulated()}))?;
                         let mut input = context::render(&self.session, &self.store)?;
+                        let rejected: Vec<_> = self
+                            .construct(&self.workspace.revision()?)?
+                            .into_iter()
+                            .filter(|c| c.class == PolicyClass::Deny)
+                            .map(|c| json!({"candidate":c.id,"reason":c.provenance}))
+                            .collect();
+                        if !rejected.is_empty() {
+                            input["rejected_proposals"] = json!(rejected);
+                        }
                         if recovering {
                             input["generation_recovery"] = json!(
                                 "The previous response hit its output limit and was discarded; no proposed action ran. Return exactly one small action. For code, create/edit only one file with a compact implementation; continue other files on later turns. Do not repeat the incomplete response."
@@ -175,21 +184,21 @@ impl Engine {
                         let future = generator.generate(input, &cancel, tx);
                         tokio::pin!(future);
                         let response = loop {
-                            tokio::select! {result=&mut future=>break result,Some(delta)=rx.recv()=>{let _=self.events.send(RunEvent{seq:0,session:self.session.id.clone(),kind:"stream".into(),data:json!({"delta":display.push(&delta)})});}}
+                            tokio::select! {result=&mut future=>break result,Some(delta)=rx.recv()=>{let _=self.events.send(RunEvent{seq:0,session:self.session.id.clone(),kind:"stream".into(),data:json!({"delta":display.push(&delta),"plain_text":generator.streams_plain_text()})});}}
                         };
                         while let Ok(delta) = rx.try_recv() {
                             let _ = self.events.send(RunEvent {
                                 seq: 0,
                                 session: self.session.id.clone(),
                                 kind: "stream".into(),
-                                data: json!({"delta":display.push(&delta)}),
+                                data: json!({"delta":display.push(&delta),"plain_text":generator.streams_plain_text()}),
                             });
                         }
                         let _ = self.events.send(RunEvent {
                             seq: 0,
                             session: self.session.id.clone(),
                             kind: "stream".into(),
-                            data: json!({"delta":display.finish()}),
+                            data: json!({"delta":display.finish(),"plain_text":generator.streams_plain_text()}),
                         });
                         match response {
                             Ok(response) => break Some(response),
@@ -362,7 +371,7 @@ impl Engine {
         }
         if actions.is_empty() {
             let files = self.workspace.files()?;
-            if self.session.context.len() == 1 {
+            if self.session.context.len() == 1 && !files.is_empty() {
                 if files.contains(&"AGENTS.md".into()) {
                     actions.push(Action::Read {
                         path: "AGENTS.md".into(),

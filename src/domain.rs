@@ -92,6 +92,9 @@ pub struct Proposal {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Usage {
+    /// Subset of output_tokens when exposed; never add it twice.
+    #[serde(default)]
+    pub reasoning_tokens: Option<u64>,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
     pub cached_input_tokens: Option<u64>,
@@ -151,6 +154,10 @@ pub struct RunConfig {
     pub mode: Mode,
     pub decision: String,
     pub generation_model: String,
+    #[serde(default = "default_output_limit")]
+    pub max_output_tokens: u32,
+    #[serde(default)]
+    pub generation_effort: Option<String>,
     #[serde(default = "default_generation_provider")]
     pub generation_provider: String,
     pub jev_model: String,
@@ -181,6 +188,8 @@ impl Default for RunConfig {
             mode: Mode::Native,
             decision: "rules".into(),
             generation_model: "gpt-4.1-2025-04-14".into(),
+            max_output_tokens: default_output_limit(),
+            generation_effort: None,
             generation_provider: default_generation_provider(),
             jev_model: "jev-1.13.0".into(),
             jev_provider: default_jev_provider(),
@@ -253,4 +262,8 @@ pub enum UiInput {
     Close,
     Approve(String),
     Deny(String),
+}
+
+pub fn default_output_limit() -> u32 {
+    16384
 }
