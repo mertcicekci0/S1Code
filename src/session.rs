@@ -74,6 +74,14 @@ pub struct Store {
     _lock: File,
     pub redactor: Redactor,
 }
+impl Drop for Store {
+    fn drop(&mut self) {
+        // Closing only our descriptor can leave flock held by a forked child
+        // until exec. Release ownership when the store itself stops owning it.
+        let _ = FileExt::unlock(&self._lock);
+    }
+}
+
 impl Store {
     pub fn create(
         home: &Path,
@@ -251,5 +259,27 @@ impl Store {
             out.push('\n');
         }
         atomic_write(path, out.as_bytes())
+    }
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::*;
+
+    #[test]
+    fn dropping_store_releases_lock_with_a_duplicate_descriptor_alive() {
+        let root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let (store, session) =
+            Store::create(home.path(), root.path(), "test".into(), Default::default()).unwrap();
+        let duplicate = store._lock.try_clone().unwrap();
+        assert!(Store::resume(home.path(), &session.id).is_err());
+        drop(store);
+        let (resumed, _) = Store::resume(home.path(), &session.id).unwrap();
+        assert!(Store::resume(home.path(), &session.id).is_err());
+        drop(duplicate);
+        assert!(Store::resume(home.path(), &session.id).is_err());
+        drop(resumed);
+        assert!(Store::resume(home.path(), &session.id).is_ok());
     }
 }

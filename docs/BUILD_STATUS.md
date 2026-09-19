@@ -44,7 +44,7 @@ and no cost, speed or task-quality superiority claim is established.
 
 ## Verification recorded locally
 
-- 64 offline Rust tests and 12 Python launcher/comparison tests passed. Coverage includes
+- 65 offline Rust tests and 12 Python launcher/comparison tests passed. Coverage includes
   fragmented streams, invalid decisions, retries, stale candidates, policy bypass,
   traversal/symlinks, concurrent edits, patch recovery, pinned overflow, exact
   rehydration, dependency closure, cancellation, restart, duplicate bridge requests,
@@ -169,6 +169,12 @@ metadata, so eviction cannot accidentally retain a second copy of code in action
 arguments. Canonical actions and exact artifact bytes remain recoverable. A
 regression covers this boundary. The default generation sub-budget is 24 while the
 combined provider request cap remains 24; this avoids premature generation-only
-stops without increasing the total request cap. All 64 Rust and 12 Python checks,
+stops without increasing the total request cap. All 65 Rust and 12 Python checks,
 formatting, clippy, release build and publication scan passed locally. Private live
 acceptance was performed; provider-restricted records are not included in Git.
+
+Workspace ownership is explicitly unlocked when a store is dropped, rather than
+waiting for every inherited descriptor to close. A duplicate-descriptor regression
+covers immediate resume and continued exclusion while the resumed store is active.
+This addresses an intermittent Linux CI failure during concurrent process spawning.
+CI now checks out full history for the publication scanner.
