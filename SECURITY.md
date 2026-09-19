@@ -13,8 +13,9 @@ policy is allow/ask/deny. Models cannot change it. By default, each patch/proces
 interactive approval bound to complete arguments, policy version, workspace identity and file
 snapshot. There is no automatic commit, push, install, destructive shell, or shell
 interpolation tool. The small process set currently supports offline Cargo test/check,
-Python unittest and exact `node --test`. Node flags, script paths, npm, package
-installation and arbitrary shell commands remain unsupported.
+Python unittest/pytest, exact `node --test` and the existing npm scripts documented
+in [supported checks](docs/project-checks.md). Arbitrary Node flags, package
+installation and shell commands remain unsupported.
 
 Native paths reject traversal, absolute paths, symlinks, dotfiles, ignored paths,
 common credential names and explicit exclusions. Root `AGENTS.md` can guide coding

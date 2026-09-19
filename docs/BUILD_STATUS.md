@@ -1,4 +1,4 @@
-# Build status — 0.3.0-rc.7
+# Build status — 0.3.0-rc.8
 
 Experimental source release candidate, prepared 2026-09-19. This is a bounded coding
 agent for trusted repositories, not a stable unrestricted automation product.
@@ -55,7 +55,15 @@ Cost, speed and task-quality advantages have not been established.
 
 ## Verification
 
-Local macOS ARM64 validation of rc.7 passed:
+rc.8 local checks passed: 110 offline Rust tests, 19 Python tests, formatting,
+all-target clippy, six headless/PTY/credential/MCP smoke scripts, release build, six evaluator fixtures and the 15-trial context probe. The
+advisory audit reported no findings. actionlint 1.7.12 accepted both workflows
+(shellcheck and pyflakes integrations disabled). Binary release preparation adds
+two native target builds, installed-archive smoke checks and checksum/manifest
+validation. Hosted rc.8 results and publication are pending at this commit.
+
+
+Baseline macOS ARM64 validation before the rc.8 changes passed:
 
 - 107 offline Rust tests, 12 Python tests, formatting and all-target clippy with
   warnings denied; optimized release build.
@@ -72,7 +80,7 @@ Local macOS ARM64 validation of rc.7 passed:
   Generated notice files remain under target/notices for binary redistribution.
 
 Hosted macOS/Linux checks and the dependency-audit job passed for source commit
-`5b226c3` ([run](https://github.com/mertcicekci0/S1Code/actions/runs/35438113977)).
+`02219ee` ([run](https://github.com/mertcicekci0/S1Code/actions/runs/35454722733)).
 CI pins the checkout action to a reviewed release commit, disables persisted
 checkout credentials and pins the Ubuntu runner label.
 

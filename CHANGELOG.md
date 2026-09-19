@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.0-rc.8
+
+- Text search enumerates allowed repository files once per action instead of once
+  per file. Exclusions and symlink checks remain enforced; discovery is refreshed
+  for each action.
+- Workspace hashes stream bounded bytes, rejecting oversized or growing snapshots
+  and symlinked root ignore files without loading a whole file into memory.
+- Tested binary packaging with dependency notices and build-path remapping, plus
+  checksum-verified installation into a user-owned prefix. No npm runtime required.
+- Manually triggered binary release workflow tests both targets and audits locked
+  dependencies before creating a draft prerelease. Third-party CI actions are pinned
+  to commits. Publication remains a separate final step.
+- Installer tests cover tampering, unsafe archives, missing notices, wrong platform,
+  linked destinations and failed replacement without losing the existing binary.
+
 ## 0.3.0-rc.7
 
 - Official Claude account login/status/logout commands, without importing tokens

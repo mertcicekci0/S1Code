@@ -21,8 +21,9 @@ Its native runtime combines **deterministic policy**, **bounded decisions**, and
 Optional Jev integration selects among fully specified actions and can help decide
 which evidence stays in the active context. S1Code owns local tool execution.
 
-> **Source preview · 0.3.0-rc.7** — macOS and Linux. Built from source; no registry
-> package or hosted binary release yet. See [implementation status](docs/BUILD_STATUS.md)
+> **Experimental preview · 0.3.0-rc.8** — macOS and Linux. Source installation
+> is available; binary distribution details are in the [installation guide](docs/install.md).
+> See [implementation status](docs/BUILD_STATUS.md)
 > for verified paths and remaining limits.
 
 ## What you can do
@@ -43,7 +44,10 @@ which evidence stays in the active context. S1Code owns local tool execution.
 
 ## Get started
 
-Requires Git and [Rust via rustup](https://rustup.rs/). The repository pins Rust
+For prebuilt binaries, verification and updates, see [installation](docs/install.md).
+There is no npm package to install.
+
+**Build from source:** requires Git and [Rust via rustup](https://rustup.rs/). The repository pins Rust
 1.94.0. Python 3 runs the included parser demo; Windows is currently unsupported.
 
 ```sh
