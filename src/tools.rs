@@ -73,6 +73,20 @@ impl Workspace {
             })
     }
     pub fn path(&self, relative: &str, new: bool) -> Result<PathBuf> {
+        let at = self.checked_path(relative, new)?;
+        if !new {
+            ensure!(
+                self.files()?.contains(&relative.to_owned()),
+                "ignored or unsupported file"
+            );
+        } else {
+            ensure!(!self.ignored(relative)?, "new file matches ignore rules");
+        }
+        Ok(at)
+    }
+    // Check each ancestor even when the name came from a bounded discovery pass.
+    // Discovery membership is reusable within one read action, never across actions.
+    fn checked_path(&self, relative: &str, new: bool) -> Result<PathBuf> {
         let path = Path::new(relative);
         ensure!(
             !relative.is_empty() && self.allowed_name(path),
@@ -93,16 +107,6 @@ impl Workspace {
             }
         }
         ensure!(at.starts_with(&self.root), "path escaped root");
-        if !new {
-            ensure!(
-                self.files()?.contains(&relative.to_owned()),
-                "ignored or unsupported file"
-            );
-        } else {
-            // Missing parents are created only after the complete patch is
-            // validated and approved. Every existing ancestor was checked above.
-            ensure!(!self.ignored(relative)?, "new file matches ignore rules");
-        }
         Ok(at)
     }
     fn ignored(&self, path: &str) -> Result<bool> {
@@ -206,8 +210,12 @@ impl Workspace {
     }
     pub fn bytes(&self, path: &str) -> Result<Vec<u8>> {
         let p = self.path(path, false)?;
+        Self::read_bounded(&p)
+    }
+    fn read_bounded(p: &Path) -> Result<Vec<u8>> {
+        let metadata = fs::symlink_metadata(p)?;
         ensure!(
-            p.metadata()?.len() <= MAX_FILE as u64,
+            metadata.is_file() && metadata.len() <= MAX_FILE as u64,
             "file exceeds read limit"
         );
         let mut bytes = vec![];
@@ -221,21 +229,14 @@ impl Workspace {
         let mut records = vec![];
         let mut total = 0u64;
         for path in self.files()? {
-            let p = self.root.join(&path);
-            let meta = p.metadata()?;
-            total += meta.len();
-            ensure!(
-                total <= 128 * 1024 * 1024,
-                "workspace snapshot exceeds 128 MiB; narrow workspace/exclusions"
-            );
-            let content = fs::read(&p)?;
-            records.push((path, hash(&content)));
+            let p = self.checked_path(&path, false)?;
+            records.push((path, snapshot_hash(&p, &mut total)?));
         }
         // Ignored paths are outside native tools; instruction/ignore changes still invalidate approvals.
         for name in [".gitignore", ".ignore"] {
             let p = self.root.join(name);
-            if p.is_file() {
-                records.push((name.into(), hash(&fs::read(p)?)));
+            if fs::symlink_metadata(&p).is_ok() {
+                records.push((name.into(), snapshot_hash(&p, &mut total)?));
             }
         }
         Ok(hash(&serde_json::to_vec(&(&self.root, records))?))
@@ -508,7 +509,12 @@ impl Workspace {
                     if cancel.is_cancelled() {
                         bail!("cancelled");
                     }
-                    let Ok(bytes) = self.bytes(&path) else {
+                    // files() already applied all discovery exclusions. Recheck
+                    // ancestors and bound the open, without walking N files N times.
+                    let Ok(bytes) = self
+                        .checked_path(&path, false)
+                        .and_then(|p| Self::read_bounded(&p))
+                    else {
                         continue;
                     };
                     scanned += bytes.len();
@@ -621,6 +627,32 @@ impl Workspace {
             diagnostic,
         })
     }
+}
+
+// Hash incrementally and enforce the cap on bytes actually read, including files
+// that grow after metadata inspection. Never follow an ignore-file symlink.
+fn snapshot_hash(path: &Path, total: &mut u64) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    const LIMIT: u64 = 128 * 1024 * 1024;
+    let metadata = fs::symlink_metadata(path)?;
+    ensure!(metadata.is_file(), "snapshot requires a regular file");
+    ensure!(
+        metadata.len() <= LIMIT.saturating_sub(*total),
+        "workspace snapshot exceeds 128 MiB; narrow workspace/exclusions"
+    );
+    let mut reader = fs::File::open(path)?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0u8; 16 * 1024];
+    loop {
+        let n = reader.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        *total += n as u64;
+        ensure!(*total <= LIMIT, "workspace grew beyond snapshot limit");
+        digest.update(&buffer[..n]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
 }
 
 #[derive(Serialize, Deserialize)]
