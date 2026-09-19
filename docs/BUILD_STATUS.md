@@ -1,4 +1,4 @@
-# Build status — 0.3.0-rc.2
+# Build status — 0.3.0-rc.5
 
 Experimental source release candidate, prepared 2026-09-19. Native coding and
 recoverable context are implemented. This is not a stable general-purpose release,
@@ -11,6 +11,10 @@ and no cost, speed or task-quality superiority claim is established.
 - Native loop: bounded discovery and literal evidence candidates, generator
   proposals, deterministic filtering, rules/Jev/constrained-generative selection,
   stale-state checks, exact approvals, execution, persistence and verification.
+- Search-derived candidates carry their own bounded, redacted matching line into
+  decision state. The terminal inspector shows the selected action and its evidence;
+  a matched misleading-result fixture exercises the ambiguity without forcing Jev
+  into deterministic steps.
 - Streaming OpenAI Responses and Anthropic Messages adapters, strict structured
   action validation, cancellation and provider-native usage. Claude defaults to
   Opus 5; model IDs are configurable. No silent provider switch.
@@ -44,7 +48,7 @@ and no cost, speed or task-quality superiority claim is established.
 
 ## Verification recorded locally
 
-- 82 offline Rust tests and 12 Python launcher/comparison tests passed. Coverage includes
+- 85 offline Rust tests and 12 Python launcher/comparison tests passed. Coverage includes
   fragmented streams, invalid decisions, retries, stale candidates, policy bypass,
   traversal/symlinks, concurrent edits, patch recovery, pinned overflow, exact
   rehydration, dependency closure, cancellation, restart, duplicate bridge requests,

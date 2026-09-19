@@ -156,6 +156,12 @@ fn selection_text(v: &Value) -> String {
         short(string(v, "candidate")),
         readable_status(string(v, "source"))
     );
+    if !v["action"].is_null() {
+        out.push_str(&format!("\n{}", action_text(&v["action"])));
+    }
+    if !string(v, "provenance").is_empty() {
+        out.push_str(&format!("\nEvidence: {}", string(v, "provenance")));
+    }
     if let Some(p) = v["selection_probability"].as_f64() {
         out.push_str(&format!("\nSelected-option probability: {p:.3}"));
     }

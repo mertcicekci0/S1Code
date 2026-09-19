@@ -3,6 +3,10 @@
 For a live task and a follow-up typed directly in the terminal, use the
 [interactive demo runbook](demo-runbook.md). No launch script is required.
 
+To inspect a real bounded choice with candidate-specific evidence, use the
+[Jev decision showcase](jev-showcase.md). It prepares matched local workspaces and
+makes no provider call itself.
+
 ## Normal task entry
 
 Run `./target/release/s1code` to open the real task-entry screen. This is not a

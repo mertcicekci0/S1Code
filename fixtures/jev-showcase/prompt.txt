@@ -1,0 +1,3 @@
+Fix the failing `calculate_score` behavior. Identify the implementation that the
+tests actually import, make the smallest correct change, and run
+`python3 -m unittest discover -s tests -v`. Do not edit archived examples or tests.

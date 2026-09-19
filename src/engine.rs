@@ -466,6 +466,7 @@ impl Engine {
             .collect::<Vec<_>>();
         let mut actions = self.session.proposals.clone();
         let mut provenance = "generation proposal";
+        let mut action_provenance = std::collections::BTreeMap::new();
         if self.session.context.is_empty() {
             actions = vec![Action::List];
             provenance = "bounded repository discovery";
@@ -520,15 +521,25 @@ impl Engine {
             let bytes = self.store.get(&last.artifact.hash)?;
             for line in String::from_utf8_lossy(&bytes).lines().take(4) {
                 let mut fields = line.splitn(3, ':');
-                if let (Some(path), Some(number)) = (fields.next(), fields.next())
+                if let (Some(path), Some(number), Some(matched)) =
+                    (fields.next(), fields.next(), fields.next())
                     && let Ok(n) = number.parse::<usize>()
                     && self.workspace.path(path, false).is_ok()
                 {
-                    actions.push(Action::Read {
+                    let action = Action::Read {
                         path: path.into(),
                         start: n.saturating_sub(10).max(1),
                         lines: 80,
-                    });
+                    };
+                    let visible = self.store.redactor.text(matched.trim());
+                    action_provenance.insert(
+                        serde_json::to_string(&action)?,
+                        format!(
+                            "literal search match at {path}:{n}: {}",
+                            crate::tools::bound(&visible, 240)
+                        ),
+                    );
+                    actions.push(action);
                 }
             }
             provenance = "literal search results";
@@ -599,7 +610,12 @@ impl Engine {
                     }
                     _ => Ok(()),
                 };
-                let mut candidate = policy::candidate(a, revision, provenance, evidence.clone());
+                let specific = serde_json::to_string(&a)
+                    .ok()
+                    .and_then(|key| action_provenance.get(&key))
+                    .map(String::as_str)
+                    .unwrap_or(provenance);
+                let mut candidate = policy::candidate(a, revision, specific, evidence.clone());
                 if let Err(error) = validation {
                     candidate.class = PolicyClass::Deny;
                     candidate.provenance = format!("deterministic input rejection: {error}");
@@ -634,7 +650,7 @@ impl Engine {
         if !ambiguous || self.session.config.decision == "rules" {
             self.event(
                 "selection",
-                json!({"candidate":first.id,"source":"deterministic_rules","forced":!ambiguous}),
+                json!({"candidate":first.id,"source":"deterministic_rules","forced":!ambiguous,"action":first.action,"provenance":first.provenance}),
             )?;
             return Ok(first);
         }
@@ -670,7 +686,7 @@ impl Engine {
                 .find(|c| c.action == result.proposal.actions[0])
                 .cloned()
                 .ok_or_else(|| anyhow::anyhow!("baseline selected outside candidate set"))?;
-            self.event("selection",json!({"source":"constrained_generative","candidate":selected.id,"model":result.model}))?;
+            self.event("selection",json!({"source":"constrained_generative","candidate":selected.id,"model":result.model,"action":selected.action,"provenance":selected.provenance}))?;
             return Ok(selected);
         }
         let state = context::selection_state(&self.session, &self.store, &admissible)?;
@@ -734,7 +750,7 @@ impl Engine {
                 .cloned()
                 .ok_or_else(|| anyhow::anyhow!("selection unavailable"))?;
                 let evidence_fallback = low_confidence && safe_evidence_action(&selection);
-                self.event("selection",json!({"source":if evidence_fallback {"jev_low_confidence_evidence"} else {"jev"},"candidate":selection.id,"choice":choice,"selection_probability":probabilities[choice],"distribution_confidence":confidence,"response":response,"threshold_experimental":true,"readonly_evidence_progress":evidence_fallback}))?;
+                self.event("selection",json!({"source":if evidence_fallback {"jev_low_confidence_evidence"} else {"jev"},"candidate":selection.id,"choice":choice,"action":selection.action,"provenance":selection.provenance,"selection_probability":probabilities[choice],"distribution_confidence":confidence,"response":response,"threshold_experimental":true,"readonly_evidence_progress":evidence_fallback}))?;
                 Ok(selection)
             }
             Err(e) => {
@@ -744,7 +760,7 @@ impl Engine {
                 }
                 self.event(
                     "selection",
-                    json!({"source":"explicit_rules_fallback","candidate":first.id}),
+                    json!({"source":"explicit_rules_fallback","candidate":first.id,"action":first.action,"provenance":first.provenance}),
                 )?;
                 Ok(first)
             }
@@ -941,6 +957,98 @@ fn safe_evidence_action(candidate: &CandidateAction) -> bool {
 #[cfg(test)]
 mod selection_tests {
     use super::*;
+
+    #[test]
+    fn search_candidates_carry_their_own_visible_match_evidence() {
+        let root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("src")).unwrap();
+        std::fs::create_dir(root.path().join("legacy")).unwrap();
+        std::fs::write(
+            root.path().join("src/score.py"),
+            "def calculate_score(): pass\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("legacy/score.py"),
+            "def calculate_score(): pass\n",
+        )
+        .unwrap();
+        let (store, mut session) = Store::create(
+            home.path(),
+            root.path(),
+            "fix calculate_score".into(),
+            RunConfig::default(),
+        )
+        .unwrap();
+        let revision = Workspace::new(root.path(), vec![])
+            .unwrap()
+            .revision()
+            .unwrap();
+        let listing = store
+            .put(
+                b"legacy/score.py\nsrc/score.py\n",
+                "native_tool",
+                "list-call",
+                &revision,
+                vec![],
+            )
+            .unwrap();
+        session.context.push(ContextItem {
+            artifact: listing,
+            action: Action::List,
+            pinned: false,
+            evicted: false,
+            diagnostic: false,
+        });
+        let artifact = store
+            .put(
+                b"legacy/score.py:1:def calculate_score(): # archived\nsrc/score.py:1:def calculate_score(): # imported by app\n",
+                "native_tool",
+                "search-call",
+                &revision,
+                vec![],
+            )
+            .unwrap();
+        session.context.push(ContextItem {
+            artifact,
+            action: Action::Search {
+                query: "calculate_score".into(),
+            },
+            pinned: false,
+            evicted: false,
+            diagnostic: false,
+        });
+        let (events, _rx) = mpsc::unbounded_channel();
+        let (_tx, input) = mpsc::unbounded_channel();
+        let engine = Engine {
+            workspace: workspace_for(&session).unwrap(),
+            generator: Arc::new(crate::demo::OfflineDemo {
+                workspace: workspace_for(&session).unwrap(),
+            }),
+            store,
+            session,
+            cancel: CancellationToken::new(),
+            events,
+            input,
+            interactive: false,
+            approved: None,
+        };
+
+        let candidates = engine.construct(&revision).unwrap();
+        let legacy = candidates
+            .iter()
+            .find(|c| matches!(&c.action, Action::Read { path, .. } if path == "legacy/score.py"))
+            .unwrap();
+        let current = candidates
+            .iter()
+            .find(|c| matches!(&c.action, Action::Read { path, .. } if path == "src/score.py"))
+            .unwrap();
+        assert!(legacy.provenance.contains("archived"));
+        assert!(current.provenance.contains("imported by app"));
+        assert_ne!(legacy.provenance, current.provenance);
+    }
+
     #[tokio::test]
     async fn sole_concrete_action_avoids_generation_escape_and_decision_request() {
         let root = tempfile::tempdir().unwrap();
