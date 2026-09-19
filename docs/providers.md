@@ -11,7 +11,7 @@ call was made during this build; model/account availability is unverified.
 
 The contract is `{"message":"visible plan","actions":[...]}` with 1–4 alternative
 next actions, not a queued program. Actions are tagged `list`, `search`, `read`,
-`patch`, `replace`, `run`, `git`, `rehydrate`, `ask_generator`, `finish`, or `blocked`. See
+`patch`, `replace`, `run`, `git`, `rehydrate`, `ask_generator`, `answer`, `finish`, or `blocked`. See
 `generation::proposal_schema` and `domain::Action` for exact arguments. Native
 providers never execute tools. No hidden reasoning is requested or displayed.
 Failures never trigger an implicit provider change or a Codex delegation.
@@ -38,7 +38,21 @@ and cache creation; these are separately recorded as `cached_input_tokens` and
 `cache_creation_input_tokens`. OpenAI input tokens include its cached subset.
 Do not add overlapping fields or compare raw input counts without normalization.
 Missing counts stay unknown. Output deltas carry cumulative counts, not additions.
-Native requests have a 180-second deadline and are not automatically retried.
+Each native request has a 180-second deadline. The engine may retry a failed Claude
+planning response twice for documented transient errors or an interrupted connection,
+within the existing request/generation caps. Retries use exponential backoff with
+jitter and honor `Retry-After`; hints over 60 seconds stop instead of retrying early.
+Authentication/validation errors, refusals, malformed proposals and unknown errors
+are not retried. HTTP 429 without a retry hint is not retried because it may be a
+spend-cap response. Every attempted request and retry is counted. Failed-stream
+usage keeps only reported counts; an initial output count is not treated as a final
+total. Error type and request ID are sanitized and retained. Completed local tools
+are never replayed to retry a response, and partial actions never execute.
+
+An exact short greeting is answered locally with zero provider/tool calls. A model
+can use `answer` (or a valid text-only Claude `end_turn`) for questions or clarification.
+That returns `awaiting_input`, never verified `completed`; code changes still require
+current passing verification before `finish`.
 
 ```sh
 read -s 'ANTHROPIC_API_KEY?Anthropic API key: '
@@ -259,7 +273,8 @@ unsupported for delegated Codex inference whose internal calls remain unknown.
 Claude output recovery: `max_tokens` is recorded separately from refusal. Native
 planning permits at most one retry asking for one smaller action, inside the same
 request/generation caps; usage from both completed responses is counted. Refusals,
-unknown stop reasons and transport-truncated streams do not trigger that retry.
+unknown stop reasons do not trigger that smaller-action retry. Transport interruption
+has the separate bounded transient recovery described above.
 Partial proposals are discarded, never executed or joined to later JSON.
 
 Native Claude uses public client-tool proposals, not a schema-constrained text

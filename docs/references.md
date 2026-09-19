@@ -101,3 +101,11 @@ No Claude credentials were inspected; no provider was called during preparation.
 Reviewed tool input schemas, streamed JSON fragments, default thinking behavior,
 effort configuration and final usage breakdown. Independently authored adapter;
 no third-party implementation reused.
+
+2026-09-19 stream recovery follow-up: rechecked the official
+[Claude error contract](https://platform.claude.com/docs/en/api/errors) and
+[stream error events](https://platform.claude.com/docs/en/build-with-claude/streaming).
+Reviewed HTTP 429/5xx, mid-stream `error`, `error.type`, `error.message`,
+`request_id`/`request-id`, cumulative usage and retry guidance. The engine owns
+bounded retries; the adapter still performs exactly one HTTP request per call.
+No third-party implementation copied.

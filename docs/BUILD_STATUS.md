@@ -44,7 +44,7 @@ and no cost, speed or task-quality superiority claim is established.
 
 ## Verification recorded locally
 
-- 74 offline Rust tests and 12 Python launcher/comparison tests passed. Coverage includes
+- 82 offline Rust tests and 12 Python launcher/comparison tests passed. Coverage includes
   fragmented streams, invalid decisions, retries, stale candidates, policy bypass,
   traversal/symlinks, concurrent edits, patch recovery, pinned overflow, exact
   rehydration, dependency closure, cancellation, restart, duplicate bridge requests,
@@ -74,7 +74,7 @@ and no cost, speed or task-quality superiority claim is established.
 - Live task-success/cost/latency comparisons across rules, Jev and constrained
   generation have not established an advantage. Eviction quality, cache reuse and
   invalidation costs require repeated matched trials; keep Jev results private.
-- Linux and macOS hosted CI passed for commit 279d230; newer changes require their
+- Linux and macOS hosted CI passed for commit 984dd96; newer changes require their
   own hosted checks after pushing. Local verification is on macOS ARM64. Windows is unsupported.
 - Native commands execute trusted repository code without an OS filesystem/network
   sandbox. Read allowlists and worktrees do not provide OS isolation. Native path
@@ -140,7 +140,7 @@ tasks directly into the home input without a shell wrapper.
 Response recovery and terminal readability: Claude terminal stop reasons are now
 recorded distinctly, including usage for complete truncated responses. A max_tokens
 response permits one smaller-action retry within existing generation/request caps;
-refusals and incomplete transport streams do not retry. Partial actions never run.
+refusals do not retry; rc.3 adds separate bounded transport recovery. Partial actions never run.
 Long tasks are folded in conversation while exact text remains in Activity;
 paste preserves newlines, tool progress/recovery are readable and empty assistant
 sections are hidden. The previously failed live Snake trace did not retain its stop
@@ -195,3 +195,20 @@ CI now checks out full history for the publication scanner.
 - `/eviction` exposes retention policy in the home screen and saved preferences.
 - New behavior has offline regression coverage; no new paid comparative evaluation
   was performed. The earlier private live coding acceptance remains a separate check.
+
+## rc.3 conversation and response recovery
+
+Exact greetings return locally without file discovery, tests or provider requests.
+Informational replies use `answer` / `awaiting_input`; they cannot mark an unverified
+coding task completed. Claude HTTP/SSE diagnostics now retain sanitized type and
+request ID. Transient generation retries are engine-owned, bounded by two retries
+and existing request caps, cancelable, and never repeat previously completed tools.
+See ADR 009. No additional paid provider calls were made for this correction.
+
+rc.3 local verification: all 82 offline Rust tests, 12 Python checks, formatting,
+all-target clippy with warnings denied, release build and four terminal/headless
+smoke checks passed. The real native CLI answered a greeting with a zero request
+cap and no tools. Recovery fixtures exercise transient exhaustion, permanent
+failure, cancellation and retry-budget exhaustion after actual patch/test execution.
+No new live provider inference was used; old generic stream errors cannot reveal
+provider details that were never persisted.

@@ -395,10 +395,10 @@ impl Screen {
                 self.stream.clear();
                 self.status = "Preparing next action…".into();
             }
-            "generation_incomplete" => {
+            "generation_incomplete" | "generation_failed" => {
                 self.stream.clear();
             }
-            "generation_recovery" => {
+            "generation_recovery" | "generation_retry" => {
                 self.message("Recovery", string(v, "message"));
                 self.stream.clear();
             }
@@ -407,6 +407,15 @@ impl Screen {
                 self.message("Tool", &action_text(&v["candidate"]["action"]));
             }
             "proposal" => {
+                if !v["actions"]
+                    .as_array()
+                    .is_some_and(|actions| actions.len() == 1 && actions[0]["type"] == "answer")
+                {
+                    self.message("Assistant", string(v, "message"));
+                }
+                self.stream.clear();
+            }
+            "answered" => {
                 self.message("Assistant", string(v, "message"));
                 self.stream.clear();
             }
@@ -429,7 +438,9 @@ impl Screen {
                 self.stream.clear();
                 self.message("Error", &details(&e));
             }
-            "no_progress" => self.message("Stopped", string(v, "message")),
+            "no_progress" | "generation_retry_stopped" => {
+                self.message("Stopped", string(v, "message"))
+            }
             "blocked" => self.message("Blocked", string(v, "reason")),
             "candidates" => self.candidates = v.clone(),
             "selection" => self.selection = v.clone(),
@@ -484,7 +495,9 @@ impl Screen {
             }
             "summary" => {
                 self.status = readable_status(string(v, "status"));
-                self.message("Result", &summary_text(v));
+                if v["status"] != "awaiting_input" {
+                    self.message("Result", &summary_text(v));
+                }
                 self.summary = Some(e.clone());
                 self.pending = None;
                 self.tab = 0;
@@ -882,6 +895,30 @@ mod tests {
             .map(|row| row.iter().map(|c| c.symbol()).collect::<String>())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+    #[test]
+    fn conversation_answers_do_not_render_a_failed_verification_summary() {
+        let mut screen = Screen::default();
+        screen.receive(event("started", json!({"task":"hi"})));
+        screen.receive(event(
+            "answered",
+            json!({"message":"Hi! What would you like to build?"}),
+        ));
+        screen.receive(event(
+            "summary",
+            json!({"status":"awaiting_input","verification":null,"metrics":{}}),
+        ));
+        screen.receive(event("input_ready", json!({})));
+        for width in [50, 110] {
+            let view = render(&mut screen, width);
+            assert!(view.contains("Hi! What would you like to build?"));
+            assert!(view.contains("Follow-up"));
+            assert!(!view.contains("No current passing verification"));
+        }
+        assert!(
+            screen.summary.is_some(),
+            "the inspector still has full metrics"
+        );
     }
     #[test]
     fn native_followup_input_wraps_and_preserves_multiline_text() {

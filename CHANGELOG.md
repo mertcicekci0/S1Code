@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0-rc.3 — Conversational replies and stream recovery
+
+- Exact greetings return to the composer without repository tools or provider calls.
+- Informational answers use `awaiting_input`, without inventing tests or claiming
+  verified coding completion. Coding `finish` still requires current verification.
+- Claude HTTP/SSE failures retain sanitized error types, request IDs and known usage.
+- Transient response retries are bounded by two attempts and existing request caps,
+  respect cancellation/Retry-After, and never replay completed tools or partial actions.
+
 ## 0.3.0-rc.2 — Native conversations and bounded decisions
 
 - Native conversations accept follow-ups, retaining exact prior requests and

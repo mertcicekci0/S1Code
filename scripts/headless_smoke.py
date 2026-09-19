@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise durable CLI approval/resume and export using the labeled offline fixture."""
 import json
+import os
 import pathlib
 import subprocess
 import tempfile
@@ -50,3 +51,23 @@ with tempfile.TemporaryDirectory(prefix="s1code-headless-") as directory:
     replay = command("replay", exported)
     assert len(replay) == len(records)
     print(json.dumps({"mode": "OFFLINE SIMULATION", "real_tools_and_resume": "passed", "approval_processes": approvals, "verification_exit": 0, "sanitized_replay": "passed", "model_inference": False}))
+
+    # Real native CLI path with a zero request cap and an explicitly fake key.
+    # This must not discover files, start tests or need provider access to say hi.
+    environment = {key: value for key, value in os.environ.items()
+                   if key in ("PATH", "HOME", "USER", "TMPDIR", "LANG")}
+    environment.update(S1CODE_KEYCHAIN="off", OPENAI_API_KEY="offline-fixture-not-a-secret")
+    reply = subprocess.run(
+        [str(binary), "--home", str(home), "run", "hi", "--workspace", str(workspace),
+         "--headless", "--provider", "openai", "--decision", "rules", "--eviction", "off",
+         "--max-provider-requests", "0", "--max-generations", "0"],
+        env=environment, capture_output=True, text=True, timeout=10, check=True,
+    )
+    records = [json.loads(line) for line in reply.stdout.splitlines()]
+    summary = next(record["data"] for record in records if record["kind"] == "summary")
+    assert summary["status"] == "awaiting_input"
+    assert all(summary["metrics"][key] == 0 for key in
+               ("tool_calls", "generative_calls", "decision_requests"))
+    assert any(record["kind"] == "answered" for record in records)
+    print(json.dumps({"native_greeting": "passed", "request_cap": 0, "tools": 0,
+                      "model_inference": False}))

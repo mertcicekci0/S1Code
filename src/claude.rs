@@ -1,7 +1,9 @@
 //! Native generation via the public Anthropic Messages API. No subscription tokens.
 use crate::{
     domain::Usage,
-    generation::{GenerationResult, Generator, INSTRUCTIONS, Sse, proposal_schema, validate},
+    generation::{
+        GenerationResult, Generator, INSTRUCTIONS, ProviderFailure, Sse, proposal_schema, validate,
+    },
 };
 use anyhow::{Context, Result, bail, ensure};
 use async_trait::async_trait;
@@ -170,6 +172,7 @@ fn action_tools() -> Vec<Value> {
                 "patch" => "Propose complete replacement content for one file. Use the exact observed before_hash; null creates a new file. This does not apply immediately: runtime policy and consent are enforced.",
                 "run" => "Propose a supported test command with exact argv and verification=true. Runtime controls execution and permissions.",
                 "finish" => "Finish only after real current verification passes and all requested files/features are present. Never finish a partial task.",
+                "answer" => "Reply to a greeting, answer a question, or ask for missing task information. Returns control to the user; does not claim verified coding completion. No tests needed just to answer.",
                 "blocked" => "Explain a concrete limitation only when evidence gathering or a supported action cannot resolve it.",
                 "search" => "Find a literal identifier in repository text, with bounded results.",
                 "rehydrate" => "Recover an evicted artifact's exact bytes without rerunning the historical action.",
@@ -228,6 +231,7 @@ fn decode_proposal(text: &str) -> Result<crate::domain::Proposal> {
                     "run",
                     "rehydrate",
                     "blocked",
+                    "answer",
                     "finish",
                 ];
                 if names.iter().any(|name| fields.contains_key(*name)) {
@@ -521,8 +525,15 @@ impl Message {
                 self.tools.is_empty(),
                 "tool proposals without tool_use completion"
             );
-            // Explicit legacy JSON responses remain accepted, never prose-parsed actions.
-            decode_proposal(&self.text)?
+            if self.text.trim_start().starts_with('{') {
+                // Explicit legacy JSON remains validated. Never parse tools from prose.
+                decode_proposal(&self.text)?
+            } else {
+                crate::domain::Proposal {
+                    message: String::new(),
+                    actions: vec![crate::domain::Action::Answer { message: self.text }],
+                }
+            }
         };
         validate(&proposal)?;
         Ok(GenerationResult {
@@ -546,7 +557,8 @@ impl Generator for Claude {
     ) -> Result<GenerationResult> {
         ensure!(!cancel.is_cancelled(), "generation cancelled");
         let body = self.request(input);
-        let response = tokio::select! {biased; _=cancel.cancelled()=>bail!("generation cancelled"), r=self.client.post(&self.endpoint).header("x-api-key", &self.key).header("anthropic-version", "2023-06-01").json(&body).send()=>r.context("Claude transport failed")?};
+        let response = tokio::select! {biased; _=cancel.cancelled()=>bail!("generation cancelled"), r=self.client.post(&self.endpoint).header("x-api-key", &self.key).header("anthropic-version", "2023-06-01").json(&body).send()=>r.map_err(|error| transport_failure(&error, &Default::default(), &self.key, Usage::default()))?};
+        let headers = response.headers().clone();
         if !response.status().is_success() {
             let status = response.status();
             let mut bytes = Vec::new();
@@ -560,7 +572,15 @@ impl Generator for Claude {
                 }
                 bytes.extend_from_slice(&chunk);
             }
-            bail!("{}", http_error(status.as_u16(), &bytes, &self.key));
+            return Err(provider_failure(
+                Some(status.as_u16()),
+                "HTTP",
+                &serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+                &self.key,
+                &headers,
+                Usage::default(),
+            )
+            .into());
         }
         let mut stream = response.bytes_stream();
         let mut parser = Sse::default();
@@ -569,56 +589,232 @@ impl Generator for Claude {
         loop {
             let chunk = tokio::select! {biased; _=cancel.cancelled()=>bail!("generation cancelled"), next=stream.next()=>next};
             let Some(chunk) = chunk else { break };
-            let chunk = chunk.context("Claude stream interrupted")?;
+            let chunk = chunk.map_err(|error| {
+                transport_failure(&error, &headers, &self.key, partial_usage(&message))
+            })?;
             captured += chunk.len();
             ensure!(
                 captured <= 4 * 1024 * 1024,
                 "Claude stream exceeded capture budget"
             );
             for event in parser.push(&chunk)? {
+                if event["type"] == "error" {
+                    return Err(provider_failure(
+                        None,
+                        "stream",
+                        &event,
+                        &self.key,
+                        &headers,
+                        partial_usage(&message),
+                    )
+                    .into());
+                }
                 message.consume(event, &deltas)?;
             }
+        }
+        if !message.stopped {
+            return Err(ProviderFailure {
+                provider: "Claude",
+                phase: "stream",
+                kind: "interrupted_stream".into(),
+                message: "Response ended before message_stop; partial output discarded".into(),
+                request_id: request_id(&headers, &self.key),
+                status: None,
+                retryable: true,
+                retry_after: None,
+                usage: partial_usage(&message),
+            }
+            .into());
         }
         parser.finish()?;
         message.finish()
     }
 }
 
-// Only selected error fields are displayed, never headers or the complete response.
-fn http_error(status: u16, body: &[u8], key: &str) -> String {
-    let value: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
-    let safe = |text: &str| {
-        let text = crate::privacy::Redactor::with_secrets(vec![key.to_owned()]).text(text);
-        let text = crate::privacy::Redactor::environment("").text(&text);
-        text.split_whitespace()
-            .map(|word| {
-                if word.contains("sk-") || word.contains("apikey_") {
-                    "[REDACTED]"
-                } else {
-                    word
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(" ")
-            .chars()
-            .take(1500)
-            .collect::<String>()
+// Only selected error fields are displayed, never headers or the full response.
+fn safe_error_text(text: &str, key: &str) -> String {
+    let text = crate::privacy::Redactor::with_secrets(vec![key.to_owned()]).text(text);
+    let text = crate::privacy::Redactor::environment("").text(&text);
+    text.split_whitespace()
+        .map(|word| {
+            if word.contains("sk-") || word.contains("apikey_") {
+                "[REDACTED]"
+            } else {
+                word
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(1500)
+        .collect()
+}
+fn request_id(headers: &reqwest::header::HeaderMap, key: &str) -> Option<String> {
+    headers
+        .get("request-id")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| safe_error_text(value, key))
+}
+fn partial_usage(message: &Message) -> Usage {
+    let mut usage = message.usage.clone();
+    if !message.ended {
+        // message_start's output count is not the total for an interrupted stream.
+        usage.output_tokens = None;
+        usage.reasoning_tokens = None;
+    }
+    usage
+}
+fn transport_failure(
+    error: &reqwest::Error,
+    headers: &reqwest::header::HeaderMap,
+    key: &str,
+    usage: Usage,
+) -> ProviderFailure {
+    ProviderFailure {
+        provider: "Claude",
+        phase: "transport",
+        kind: if error.is_timeout() {
+            "timeout"
+        } else {
+            "connection_error"
+        }
+        .into(),
+        message: "Connection failed or was interrupted; partial output discarded".into(),
+        request_id: request_id(headers, key),
+        status: None,
+        retryable: error.is_timeout() || error.is_connect() || error.is_body(),
+        retry_after: None,
+        usage,
+    }
+}
+fn provider_failure(
+    status: Option<u16>,
+    phase: &'static str,
+    value: &Value,
+    key: &str,
+    headers: &reqwest::header::HeaderMap,
+    usage: Usage,
+) -> ProviderFailure {
+    let kind = value["error"]["type"].as_str().unwrap_or("unknown_error");
+    let retry_after = headers
+        .get("retry-after")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| {
+            value
+                .parse::<u64>()
+                .ok()
+                .map(std::time::Duration::from_secs)
+                .or_else(|| {
+                    httpdate::parse_http_date(value).ok().map(|date| {
+                        date.duration_since(std::time::SystemTime::now())
+                            .unwrap_or_default()
+                    })
+                })
+        });
+    let retryable = match status {
+        Some(500 | 502 | 503 | 504 | 529) => true,
+        Some(429) => retry_after.is_some(), // A spend-cap response may have no retry-after.
+        Some(_) => false,
+        None => {
+            matches!(kind, "api_error" | "overloaded_error" | "timeout_error")
+                || (kind == "rate_limit_error" && retry_after.is_some())
+        }
     };
-    let kind = safe(value["error"]["type"].as_str().unwrap_or("unknown_error"));
-    let message = safe(
-        value["error"]["message"]
+    ProviderFailure {
+        provider: "Claude",
+        phase,
+        kind: safe_error_text(kind, key),
+        message: safe_error_text(
+            value["error"]["message"]
+                .as_str()
+                .unwrap_or("Provider returned no readable JSON error details"),
+            key,
+        ),
+        request_id: value["request_id"]
             .as_str()
-            .unwrap_or("Provider returned no readable JSON error details."),
-    );
-    let request = safe(value["request_id"].as_str().unwrap_or("unavailable"));
-    format!(
-        "Claude HTTP {status} ({kind}): {message}\nRequest ID: {request}. No automatic retry or provider fallback."
+            .map(|value| safe_error_text(value, key))
+            .or_else(|| request_id(headers, key)),
+        status,
+        retryable,
+        retry_after,
+        usage,
+    }
+}
+#[cfg(test)]
+fn http_error(status: u16, body: &[u8], key: &str) -> String {
+    provider_failure(
+        Some(status),
+        "HTTP",
+        &serde_json::from_slice(body).unwrap_or(Value::Null),
+        key,
+        &Default::default(),
+        Usage::default(),
     )
+    .to_string()
 }
 
 #[cfg(test)]
 mod error_tests {
     use super::*;
+    #[test]
+    fn http_retry_headers_are_used_without_exposing_unrelated_headers() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("request-id", "req_header".parse().unwrap());
+        headers.insert("authorization", "private-header".parse().unwrap());
+        headers.insert("retry-after", "3".parse().unwrap());
+        let body = json!({"error":{"type":"rate_limit_error","message":"Try later"}});
+        let failure = provider_failure(
+            Some(429),
+            "HTTP",
+            &body,
+            "fixture-key",
+            &headers,
+            Usage::default(),
+        );
+        assert!(failure.retryable);
+        assert_eq!(failure.request_id.as_deref(), Some("req_header"));
+        assert!(failure.retry_delay(0).unwrap().as_secs() >= 3);
+        assert!(!failure.to_string().contains("private-header"));
+        headers.remove("retry-after");
+        assert!(
+            !provider_failure(
+                Some(429),
+                "HTTP",
+                &body,
+                "fixture-key",
+                &headers,
+                Usage::default()
+            )
+            .retryable
+        );
+        for status in [400, 401, 403, 404, 422] {
+            assert!(
+                !provider_failure(
+                    Some(status),
+                    "HTTP",
+                    &body,
+                    "fixture-key",
+                    &headers,
+                    Usage::default()
+                )
+                .retryable
+            );
+        }
+        let date = std::time::SystemTime::now() + std::time::Duration::from_secs(10);
+        headers.insert(
+            "retry-after",
+            httpdate::fmt_http_date(date).parse().unwrap(),
+        );
+        let failure = provider_failure(
+            Some(529),
+            "HTTP",
+            &body,
+            "fixture-key",
+            &headers,
+            Usage::default(),
+        );
+        assert!(failure.retry_delay(0).unwrap().as_secs() >= 8);
+    }
     #[test]
     fn growing_evidence_keeps_cacheable_prefix_and_all_dynamic_fields() {
         let original = json!({"task":"fix parser","constraints":"never run without approval",

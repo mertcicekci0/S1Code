@@ -101,6 +101,9 @@ impl Engine {
             self.event("recovery_required",json!({"message":"An interrupted action may have completed. Inspect workspace and trace, recover any patch journal, then resume with --acknowledge-interruption. No automatic replay."}))?;
             return Ok(());
         }
+        if self.session.status == RunStatus::AwaitingInput {
+            return Ok(());
+        }
         if self.session.status == RunStatus::Completed {
             if !self
                 .session
@@ -114,6 +117,19 @@ impl Engine {
             }
             return Ok(());
         }
+        self.session.status = RunStatus::Running;
+        self.event("started",json!({"mode":"native","decision":self.session.config.decision,"decision_provider":self.session.config.jev_provider,"model":self.session.config.generation_model,"generation_provider":self.session.config.generation_provider,"simulation":self.session.config.offline_demo,"auto_approve":self.session.config.auto_approve,"session":self.session.id,"task":self.session.task}))?;
+        if self.session.pending.is_none()
+            && self.session.proposals.is_empty()
+            && let Some(message) = greeting_reply(&self.session.task)
+        {
+            self.session.status = RunStatus::AwaitingInput;
+            self.event(
+                "answered",
+                json!({"message":message,"source":"local_greeting","coding_completion":false}),
+            )?;
+            return Ok(());
+        }
         let mut jev =
             if self.session.config.decision == "jev" || self.session.config.eviction == "jev" {
                 Some(crate::decisions::Jev::from_config(&self.session.config)?)
@@ -123,8 +139,6 @@ impl Engine {
         if let Some(j) = &mut jev {
             j.max_requests = self.session.config.max_provider_requests;
         }
-        self.session.status = RunStatus::Running;
-        self.event("started",json!({"mode":"native","decision":self.session.config.decision,"decision_provider":self.session.config.jev_provider,"model":self.session.config.generation_model,"generation_provider":self.session.config.generation_provider,"simulation":self.session.config.offline_demo,"auto_approve":self.session.config.auto_approve,"session":self.session.id,"task":self.session.task}))?;
         while self.session.steps < self.session.config.max_steps {
             if self.cancel.is_cancelled() {
                 self.session.status = RunStatus::Cancelled;
@@ -175,6 +189,8 @@ impl Engine {
             match &chosen.action {
                 Action::AskGenerator => {
                     let mut recovering = false;
+                    let mut transient_retries = 0;
+                    let mut attempts = 0;
                     let response = loop {
                         if self.session.metrics.generative_calls
                             + self.session.metrics.decision_requests
@@ -186,7 +202,7 @@ impl Engine {
                             self.session.status = RunStatus::BudgetExhausted;
                             break None;
                         }
-                        if !recovering {
+                        if attempts == 0 {
                             self.compact_context(&mut jev).await?;
                             if self.session.metrics.generative_calls
                                 + self.session.metrics.decision_requests
@@ -196,9 +212,10 @@ impl Engine {
                                 break None;
                             }
                         }
-                        if recovering {
+                        if attempts > 0 {
                             self.session.metrics.retries += 1;
                         }
+                        attempts += 1;
                         if self.generator.simulated() {
                             self.session.metrics.simulated_turns += 1;
                         } else {
@@ -247,6 +264,37 @@ impl Engine {
                         match response {
                             Ok(response) => break Some(response),
                             Err(error) => {
+                                if self.cancel.is_cancelled() {
+                                    bail!("generation cancelled");
+                                }
+                                if let Some(failure) =
+                                    error.downcast_ref::<crate::generation::ProviderFailure>()
+                                {
+                                    self.session.metrics.usage.push(failure.usage.clone());
+                                    self.event("generation_failed", json!({"provider":failure.provider,"phase":failure.phase,"kind":failure.kind,"message":failure.to_string(),"request_id":failure.request_id,"status":failure.status,"retryable":failure.retryable,"usage":failure.usage,"usage_complete":false,"partial_actions_discarded":true}))?;
+                                    if let Some(delay) = failure.retry_delay(transient_retries) {
+                                        if self.session.metrics.generative_calls
+                                            + self.session.metrics.decision_requests
+                                            >= self.session.config.max_provider_requests
+                                            || self.session.metrics.generative_calls
+                                                + self.session.metrics.simulated_turns
+                                                >= self.session.config.max_generations
+                                        {
+                                            self.session.status = RunStatus::BudgetExhausted;
+                                            self.event("generation_retry_stopped", json!({"message":format!("{failure} No requests remain to retry the interrupted response. No tools were replayed.")}))?;
+                                            break None;
+                                        }
+                                        transient_retries += 1;
+                                        self.event("generation_retry", json!({"attempt":transient_retries,"max_retries":2,"delay_ms":delay.as_millis(),"message":format!("{failure} Retrying the response ({transient_retries}/2) within the remaining request budget; completed tools will not be replayed.")}))?;
+                                        tokio::select! { biased; _=self.cancel.cancelled()=>bail!("generation cancelled"), _=tokio::time::sleep(delay)=>{} }
+                                        continue;
+                                    }
+                                    if failure.retryable && transient_retries == 2 {
+                                        bail!(
+                                            "{failure} Retry limit reached (2); no provider fallback."
+                                        );
+                                    }
+                                }
                                 if let Some(incomplete) =
                                     error.downcast_ref::<crate::claude::IncompleteResponse>()
                                 {
@@ -275,6 +323,15 @@ impl Engine {
                     self.session.metrics.usage.push(response.usage.clone());
                     self.session.proposals = response.proposal.actions.clone();
                     self.event("proposal",json!({"message":response.proposal.message,"actions":response.proposal.actions,"model":response.model,"usage":response.usage}))?;
+                }
+                Action::Answer { message } => {
+                    self.session.proposals.clear();
+                    self.session.status = RunStatus::AwaitingInput;
+                    self.event(
+                        "answered",
+                        json!({"message":message,"source":"generation","coding_completion":false}),
+                    )?;
+                    break;
                 }
                 Action::Finish { summary } => {
                     if self
@@ -835,6 +892,21 @@ impl Engine {
                 None=>return Ok(false),_=>{}
             }}
         }
+    }
+}
+
+/// Exact conversational openers only. A greeting followed by a task is never
+/// classified by this shortcut, and it does not claim to be model inference.
+fn greeting_reply(task: &str) -> Option<&'static str> {
+    let greeting = task.trim().trim_end_matches(['!', '.', '?']).to_lowercase();
+    match greeting.as_str() {
+        "hi" | "hello" | "hey" | "hi s1code" | "hello s1code" => {
+            Some("Hi! What would you like to build, fix or understand?")
+        }
+        "selam" | "merhaba" | "selam s1code" | "merhaba s1code" => {
+            Some("Merhaba! Ne geliştirmek, düzeltmek veya öğrenmek istersin?")
+        }
+        _ => None,
     }
 }
 

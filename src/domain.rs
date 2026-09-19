@@ -70,6 +70,10 @@ pub enum Action {
         artifact: String,
     },
     AskGenerator,
+    /// Conversational reply, not a claim of verified coding completion.
+    Answer {
+        message: String,
+    },
     Finish {
         summary: String,
     },

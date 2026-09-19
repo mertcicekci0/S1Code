@@ -453,7 +453,7 @@ async fn claude_rejects_partial_refused_or_malformed_streams() {
         late_text,
         claude_events(&text, "max_tokens"),
         claude_events(&text, "refusal"),
-        claude_events("not JSON", "end_turn"),
+        claude_events("{malformed JSON", "end_turn"),
         vec![json!({"type":"error"})],
     ]
     .into_iter()
@@ -740,4 +740,208 @@ async fn claude_rejects_unknown_tools_bad_arguments_and_truncated_tool_inputs() 
         "max_tokens"
     );
     server.await.unwrap();
+}
+
+#[tokio::test]
+async fn claude_stream_errors_preserve_sanitized_cause_and_never_return_partial_actions() {
+    for (kind, retryable) in [
+        ("overloaded_error", true),
+        ("api_error", true),
+        ("authentication_error", false),
+        ("invalid_request_error", false),
+        ("unknown_future_error", false),
+    ] {
+        let mut events = claude_tool_events(
+            json!({"type":"patch","edits":[{"path":"do-not-create","before_hash":null,"content":"private-partial-code"}]}),
+            "tool_use",
+        );
+        events.truncate(events.len() - 2); // A complete block is still untrusted until message_stop.
+        events.push(json!({"type":"error","error":{"type":kind,"message":"Provider temporarily failed fixture-secret sk-ant-api-fixture \u{1b}[31m"},"request_id":"req_fixture","headers":{"authorization":"private-header"}}));
+        let (url, server) = mock(vec![(200, claude_wire(events))]).await;
+        let generator =
+            s1code::claude::Claude::new("fixture-secret".into(), "claude-fixture", &url).unwrap();
+        let (tx, _) = mpsc::unbounded_channel();
+        let error = generator
+            .generate(json!({}), &CancellationToken::new(), tx)
+            .await
+            .err()
+            .unwrap();
+        let failure = error
+            .downcast_ref::<s1code::generation::ProviderFailure>()
+            .unwrap();
+        assert_eq!(failure.kind, kind);
+        assert_eq!(failure.retryable, retryable);
+        assert_eq!(failure.request_id.as_deref(), Some("req_fixture"));
+        assert_eq!(failure.usage.output_tokens, None); // Initial count is not a final total.
+        let text = error.to_string();
+        for forbidden in [
+            "private-partial-code",
+            "fixture-secret",
+            "sk-ant-api-fixture",
+            "private-header",
+            "\u{1b}",
+        ] {
+            assert!(!text.contains(forbidden));
+        }
+        assert!(text.contains(kind) && text.contains("req_fixture"));
+        assert_eq!(server.await.unwrap().len(), 1); // Retry ownership belongs to the engine.
+    }
+}
+
+#[tokio::test]
+async fn claude_plain_answers_are_not_executable_or_verified_completion() {
+    let text = "Hello! What should we build?";
+    let (url, server) = mock(vec![(200, claude_wire(claude_events(text, "end_turn")))]).await;
+    let generator = s1code::claude::Claude::new("test-key".into(), "claude-fixture", &url).unwrap();
+    let (tx, _) = mpsc::unbounded_channel();
+    let result = generator
+        .generate(json!({}), &CancellationToken::new(), tx)
+        .await
+        .unwrap();
+    assert_eq!(
+        result.proposal.actions,
+        [s1code::domain::Action::Answer {
+            message: text.into()
+        }]
+    );
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn transient_generation_retries_keep_tools_once_and_honor_budget_and_cancellation() {
+    use s1code::{
+        domain::*,
+        engine::{Engine, workspace_for},
+        session::Store,
+    };
+    use std::sync::Arc;
+    for case in ["recover", "exhaust", "budget", "cancel", "permanent"] {
+        let root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let error_kind = if case == "permanent" {
+            "invalid_request_error"
+        } else {
+            "overloaded_error"
+        };
+        let error_wire = claude_wire(vec![
+            json!({"type":"error","error":{"type":error_kind,"message":"fixture failure"},"request_id":"req_fixture"}),
+        ]);
+        let patch = json!({"type":"patch","edits":[{"path":"test_value.py","before_hash":null,"content":"import unittest\nclass Check(unittest.TestCase):\n def test_ok(self): self.assertEqual(2 + 2, 4)\n"}]});
+        let mut responses = vec![
+            (200, claude_wire(claude_tool_events(patch, "tool_use"))),
+            (
+                200,
+                claude_wire(claude_tool_events(
+                    json!({"type":"run","argv":["python3","-m","unittest"],"verification":true}),
+                    "tool_use",
+                )),
+            ),
+            (200, error_wire.clone()),
+        ];
+        if case == "recover" {
+            responses.push((
+                200,
+                claude_wire(claude_tool_events(
+                    json!({"type":"finish","summary":"Actual test passed"}),
+                    "tool_use",
+                )),
+            ));
+        } else if case == "exhaust" {
+            responses.extend([(200, error_wire.clone()), (200, error_wire)]);
+        }
+        let expected_calls = responses.len();
+        let (url, server) = mock(responses).await;
+        let (store, session) = Store::create(
+            home.path(),
+            root.path(),
+            "Create and verify a small module".into(),
+            RunConfig {
+                auto_approve: true,
+                max_provider_requests: if case == "budget" { 3 } else { 8 },
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let (events, mut rx) = mpsc::unbounded_channel();
+        let (_input, inputs) = mpsc::unbounded_channel();
+        let cancel = CancellationToken::new();
+        let worker = tokio::spawn(
+            Engine {
+                workspace: workspace_for(&session).unwrap(),
+                store,
+                session,
+                generator: Arc::new(
+                    s1code::claude::Claude::new("fixture-key".into(), "claude-fixture", &url)
+                        .unwrap(),
+                ),
+                cancel: cancel.clone(),
+                events,
+                input: inputs,
+                interactive: false,
+                approved: None,
+            }
+            .run(),
+        );
+        let mut tools = vec![];
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            while let Some(event) = rx.recv().await {
+                if event.kind == "generation_retry" && case == "cancel" {
+                    cancel.cancel();
+                }
+                if event.kind == "tool_started" {
+                    tools.push(
+                        event.data["candidate"]["action"]["type"]
+                            .as_str()
+                            .unwrap()
+                            .to_owned(),
+                    );
+                }
+            }
+        })
+        .await
+        .unwrap();
+        let result = worker.await.unwrap().unwrap();
+        let expected_status = match case {
+            "recover" => RunStatus::Completed,
+            "budget" => RunStatus::BudgetExhausted,
+            "cancel" => RunStatus::Cancelled,
+            _ => RunStatus::Failed,
+        };
+        assert_eq!(result.status, expected_status, "{case}");
+        assert_eq!(tools, ["list", "patch", "run"], "no replay: {case}");
+        assert_eq!(result.metrics.generative_calls, expected_calls as u64);
+        assert_eq!(
+            result.metrics.retries,
+            expected_calls.saturating_sub(3) as u64
+        );
+        assert_eq!(result.metrics.usage.len(), expected_calls);
+        assert!(result.verified.is_some());
+        assert!(!root.path().join("do-not-create").exists());
+        assert_eq!(server.await.unwrap().len(), expected_calls);
+    }
+}
+
+#[test]
+fn generation_retry_delay_is_bounded_and_respects_provider_hint() {
+    use s1code::{domain::Usage, generation::ProviderFailure};
+    use std::time::Duration;
+    let mut failure = ProviderFailure {
+        provider: "fixture",
+        phase: "HTTP",
+        kind: "overloaded_error".into(),
+        message: String::new(),
+        request_id: None,
+        status: Some(529),
+        retryable: true,
+        retry_after: Some(Duration::from_secs(5)),
+        usage: Usage::default(),
+    };
+    assert!(failure.retry_delay(0).unwrap() >= Duration::from_secs(5));
+    assert!(failure.retry_delay(1).unwrap() >= Duration::from_secs(5));
+    assert!(failure.retry_delay(2).is_none());
+    failure.retry_after = Some(Duration::from_secs(61));
+    assert!(failure.retry_delay(0).is_none()); // Never shorten Retry-After to retry early.
+    failure.retry_after = None;
+    failure.retryable = false;
+    assert!(failure.retry_delay(0).is_none());
 }

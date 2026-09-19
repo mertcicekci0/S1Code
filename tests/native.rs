@@ -666,3 +666,161 @@ fn followup_rejects_unknown_effects_and_secrets_without_resetting_budgets() {
     assert_eq!(s.config.max_provider_requests, 24);
     assert!(s.pending.is_none() && s.proposals.is_empty() && s.verified.is_none());
 }
+
+#[tokio::test]
+async fn exact_greetings_do_not_discover_execute_or_call_providers() {
+    use s1code::generation::{GenerationResult, Generator};
+    struct NoCalls;
+    #[async_trait::async_trait]
+    impl Generator for NoCalls {
+        async fn generate(
+            &self,
+            _: serde_json::Value,
+            _: &CancellationToken,
+            _: mpsc::UnboundedSender<String>,
+        ) -> anyhow::Result<GenerationResult> {
+            panic!("a greeting must not call a provider")
+        }
+    }
+    for greeting in ["hi", " Hello! ", "merhaba", "SELAM."] {
+        let root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        fs::write(
+            root.path().join("test.js"),
+            "throw new Error('must not execute')",
+        )
+        .unwrap();
+        let (store, session) = Store::create(
+            home.path(),
+            root.path(),
+            greeting.into(),
+            RunConfig {
+                decision: "jev".into(),
+                eviction: "jev".into(),
+                auto_approve: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let id = session.id.clone();
+        let (events, mut rx) = mpsc::unbounded_channel();
+        let (_input, inputs) = mpsc::unbounded_channel();
+        let result = Engine {
+            workspace: workspace_for(&session).unwrap(),
+            store,
+            session,
+            generator: Arc::new(NoCalls),
+            cancel: CancellationToken::new(),
+            events,
+            input: inputs,
+            interactive: false,
+            approved: None,
+        }
+        .run()
+        .await
+        .unwrap();
+        assert_eq!(result.status, RunStatus::AwaitingInput);
+        assert!(result.context.is_empty());
+        assert!(result.verified.is_none());
+        assert_eq!(
+            result.metrics.tool_calls
+                + result.metrics.generative_calls
+                + result.metrics.decision_requests,
+            0
+        );
+        let mut answered = false;
+        while let Some(event) = rx.recv().await {
+            answered |= event.kind == "answered";
+            assert!(!matches!(
+                event.kind.as_str(),
+                "tool_started" | "generation_requested" | "decision_requested" | "completed"
+            ));
+        }
+        assert!(answered);
+        let (_store, reloaded) = Store::resume(home.path(), &id).unwrap();
+        assert_eq!(reloaded.status, RunStatus::AwaitingInput);
+    }
+}
+
+#[tokio::test]
+async fn greeting_then_answer_keeps_conversation_without_claiming_verified_completion() {
+    use s1code::generation::{GenerationResult, Generator};
+    struct Answer;
+    #[async_trait::async_trait]
+    impl Generator for Answer {
+        fn simulated(&self) -> bool {
+            true
+        }
+        async fn generate(
+            &self,
+            input: serde_json::Value,
+            _: &CancellationToken,
+            _: mpsc::UnboundedSender<String>,
+        ) -> anyhow::Result<GenerationResult> {
+            assert_eq!(input["task"], "hi, explain what you can do");
+            Ok(GenerationResult {
+                proposal: Proposal {
+                    message: String::new(),
+                    actions: vec![Action::Answer {
+                        message: "I can help with coding tasks. What would you like to build?"
+                            .into(),
+                    }],
+                },
+                usage: Usage::default(),
+                model: "offline-test".into(),
+            })
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let (store, session) = Store::create(
+        home.path(),
+        root.path(),
+        "hi".into(),
+        RunConfig {
+            interactive_followups: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let (events, mut rx) = mpsc::unbounded_channel();
+    let (input, inputs) = mpsc::unbounded_channel();
+    let worker = tokio::spawn(
+        Engine {
+            workspace: workspace_for(&session).unwrap(),
+            store,
+            session,
+            generator: Arc::new(Answer),
+            cancel: CancellationToken::new(),
+            events,
+            input: inputs,
+            interactive: true,
+            approved: None,
+        }
+        .run(),
+    );
+    let mut turns = 0;
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while let Some(event) = rx.recv().await {
+            assert_ne!(event.kind, "completed");
+            if event.kind == "input_ready" {
+                turns += 1;
+                input
+                    .send(if turns == 1 {
+                        UiInput::Message("hi, explain what you can do".into())
+                    } else {
+                        UiInput::Close
+                    })
+                    .unwrap();
+            }
+        }
+    })
+    .await
+    .unwrap();
+    let result = worker.await.unwrap().unwrap();
+    assert_eq!(turns, 2);
+    assert_eq!(result.status, RunStatus::AwaitingInput);
+    assert!(result.verified.is_none());
+    assert_eq!(result.metrics.simulated_turns, 1);
+    assert_eq!(result.prior_user_requests, ["hi"]);
+}
