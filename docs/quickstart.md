@@ -11,7 +11,11 @@ launcher in login Keychain. No export commands are required; macOS may request
 Keychain access. Explicit environment keys take precedence. Keys stay in provider
 memory and are not added to child-process environments. On other platforms,
 configure ANTHROPIC_API_KEY and the Jev key. To use native Claude with Jev,
-then enter `/provider claude` and `/jev openrouter`. Submit a task as normal text.
+then enter `/provider claude` and `/jev typesafe` (or `/jev openrouter` for that gateway).
+Use `/model claude-opus-5` to select your model. Optional `/permissions full-access`
+preauthorizes supported native actions; `/permissions manual` restores prompts.
+Changing provider resets this choice. Paste your task directly into the input and
+press Enter; no shell clipboard command is needed.
 After a task, `q` closes its activity view and returns home. New prompts create
 independent saved tasks; `/resume ID` reopens an existing one. `/claude-code` hands
 the terminal to the official Claude Code application and does not use Jev.

@@ -469,7 +469,7 @@ async fn execute(cmd: Commands, home: PathBuf) -> Result<()> {
 fn home_run(task: String, settings: &s1code::home::Settings) -> RunArgs {
     let delegated = settings.provider == "codex";
     RunArgs {
-        auto_approve: false,
+        auto_approve: settings.auto_approve && !delegated,
         task,
         workspace: settings.workspace.clone(),
         mode: if delegated { "codex" } else { "native" }.into(),

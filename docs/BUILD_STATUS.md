@@ -44,7 +44,7 @@ and no cost, speed or task-quality superiority claim is established.
 
 ## Verification recorded locally
 
-- 53 offline Rust tests and 12 Python launcher/comparison tests passed. Coverage includes
+- 54 offline Rust tests and 12 Python launcher/comparison tests passed. Coverage includes
   fragmented streams, invalid decisions, retries, stale candidates, policy bypass,
   traversal/symlinks, concurrent edits, patch recovery, pinned overflow, exact
   rehydration, dependency closure, cancellation, restart, duplicate bridge requests,
@@ -132,3 +132,7 @@ trial has been started by the preparation or verification scripts.
 Native credential usability: direct CLI reads existing macOS Keychain entries for
 Claude, TypeSafe and OpenRouter, with explicit environment override and no child
 environment mutation. Credential lookup errors never include captured key output.
+
+Interactive home supports explicit `/permissions full-access` for native tasks,
+shows auto-approval state and resets consent on provider change. Users can paste
+tasks directly into the home input without a shell wrapper.

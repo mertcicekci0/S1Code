@@ -19,10 +19,11 @@ use std::{io, path::PathBuf};
 
 const ACCENT: Color = Color::Rgb(111, 211, 194);
 const MUTED: Color = Color::Rgb(151, 163, 177);
-pub const HELP: &str = "/provider codex|openai|claude  /model MODEL  /decision rules|jev|generative\n/jev openrouter|typesafe  /workspace PATH  /login  /account  /sessions\n/resume ID  /continue ID (Codex)  /demo  /claude-code  /help  /exit\nNative keys: OPENAI_API_KEY or ANTHROPIC_API_KEY; Jev: OPENROUTER_API_KEY or TYPESAFE_API_KEY. Set keys in the environment, never in this prompt.";
+pub const HELP: &str = "/provider codex|openai|claude  /model MODEL  /decision rules|jev|generative\n/jev openrouter|typesafe  /workspace PATH  /permissions manual|full-access  /login  /account  /sessions\n/resume ID  /continue ID (Codex)  /demo  /claude-code  /help  /exit\nNative keys: OPENAI_API_KEY or ANTHROPIC_API_KEY; Jev: OPENROUTER_API_KEY or TYPESAFE_API_KEY. Set keys in the environment, never in this prompt.";
 
 #[derive(Clone)]
 pub struct Settings {
+    pub auto_approve: bool,
     pub provider: String,
     pub model: Option<String>,
     pub decision: String,
@@ -32,6 +33,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            auto_approve: false,
             provider: "codex".into(),
             model: None,
             decision: "rules".into(),
@@ -46,12 +48,17 @@ impl Settings {
             "ChatGPT account · Codex owns execution · Jev not active".into()
         } else {
             format!(
-                "Native · S1Code executes tools · decisions: {}{}",
+                "Native · S1Code executes tools · decisions: {}{}{}",
                 self.decision,
                 if self.decision == "jev" {
                     format!(" via {}", self.jev_provider)
                 } else {
                     String::new()
+                },
+                if self.auto_approve {
+                    " · AUTO APPROVE (supported actions)"
+                } else {
+                    ""
                 }
             )
         }
@@ -142,6 +149,7 @@ pub fn interpret(line: &str, settings: &mut Settings) -> Result<Option<Command>>
                 "Choose /provider codex, openai or claude"
             );
             settings.provider = args.into();
+            settings.auto_approve = false;
             settings.model = None;
         }
         "/model" => {
@@ -170,6 +178,17 @@ pub fn interpret(line: &str, settings: &mut Settings) -> Result<Option<Command>>
                 settings.jev_provider = args.into();
                 settings.decision = "jev".into();
             }
+        }
+        "/permissions" => {
+            ensure!(
+                settings.provider != "codex",
+                "Codex manages its own permissions; choose a native provider first"
+            );
+            ensure!(
+                ["manual", "full-access"].contains(&args),
+                "Use /permissions manual or full-access"
+            );
+            settings.auto_approve = args == "full-access";
         }
         "/workspace" => {
             ensure!(!args.is_empty(), "Use /workspace PATH");
@@ -434,6 +453,25 @@ mod tests {
             );
             assert!(!buffer.contains("OFFLINE SIMULATION"));
         }
+    }
+    #[test]
+    fn home_auto_approval_is_explicit_native_and_reset_on_provider_change() {
+        let mut settings = Settings::default();
+        assert!(interpret("/permissions full-access", &mut settings).is_err());
+        interpret("/provider claude", &mut settings).unwrap();
+        assert!(!settings.auto_approve);
+        interpret("/permissions full-access", &mut settings).unwrap();
+        assert!(settings.auto_approve);
+        assert!(settings.ownership().contains("AUTO APPROVE"));
+        assert!(matches!(
+            interpret("Build a snake game", &mut settings).unwrap(),
+            Some(Command::Task(_))
+        ));
+        interpret("/permissions manual", &mut settings).unwrap();
+        assert!(!settings.auto_approve);
+        interpret("/permissions full-access", &mut settings).unwrap();
+        interpret("/provider codex", &mut settings).unwrap();
+        assert!(!settings.auto_approve);
     }
     #[test]
     fn editor_handles_unicode_paste_without_submitting_or_injecting_controls() {
