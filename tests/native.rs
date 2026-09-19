@@ -12,6 +12,141 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
+async fn test_discovery_validates_directory_again_before_execution() {
+    let root = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    for name in ["tests", "ignored", "excluded", "secrets"] {
+        fs::create_dir(root.path().join(name)).unwrap();
+    }
+    fs::write(root.path().join(".gitignore"), "ignored/\n").unwrap();
+    fs::write(root.path().join("file.py"), "").unwrap();
+    let workspace = Workspace::new(root.path(), vec!["excluded".into()]).unwrap();
+    let command = |path: &str| {
+        ["python3", "-m", "unittest", "discover", "-s", path, "-v"]
+            .map(String::from)
+            .to_vec()
+    };
+    assert!(workspace.validate_command(&command("tests")).is_ok());
+    for path in [
+        "ignored", "excluded", "secrets", "missing", "file.py", "../tests",
+    ] {
+        assert!(
+            workspace.validate_command(&command(path)).is_err(),
+            "{path}"
+        );
+    }
+    let (store, _) = Store::create(
+        home.path(),
+        root.path(),
+        "check".into(),
+        RunConfig::default(),
+    )
+    .unwrap();
+    let action = Action::Run {
+        argv: command("tests"),
+        verification: true,
+    };
+    // A directory swap is not captured by an earlier candidate's file hashes.
+    fs::remove_dir(root.path().join("tests")).unwrap();
+    #[cfg(unix)]
+    {
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(
+            outside.path().join("test_escape.py"),
+            "raise RuntimeError('must not execute')",
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.path().join("tests")).unwrap();
+        let error = workspace
+            .execute(&action, &store, &CancellationToken::new())
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("symlink"));
+    }
+    #[cfg(not(unix))]
+    assert!(
+        workspace
+            .execute(&action, &store, &CancellationToken::new())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn rejected_commands_give_the_generator_actionable_feedback() {
+    use async_trait::async_trait;
+    use s1code::generation::{GenerationResult, Generator};
+    use serde_json::Value;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct CorrectingGenerator(AtomicUsize);
+    #[async_trait]
+    impl Generator for CorrectingGenerator {
+        fn simulated(&self) -> bool {
+            true
+        }
+        async fn generate(
+            &self,
+            input: Value,
+            _: &CancellationToken,
+            _: mpsc::UnboundedSender<String>,
+        ) -> anyhow::Result<GenerationResult> {
+            let action = if self.0.fetch_add(1, Ordering::SeqCst) == 0 {
+                Action::Run {
+                    argv: vec!["npm".into(), "test".into()],
+                    verification: true,
+                }
+            } else {
+                let reason = input["rejected_proposals"][0]["reason"].as_str().unwrap();
+                assert!(reason.contains("unsupported command"));
+                assert!(reason.contains("node --test"));
+                Action::Answer {
+                    message: "This project requires an unsupported test runner.".into(),
+                }
+            };
+            Ok(GenerationResult {
+                proposal: Proposal {
+                    message: String::new(),
+                    actions: vec![action],
+                },
+                model: "offline fixture".into(),
+                usage: Usage::default(),
+            })
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let (store, session) = Store::create(
+        home.path(),
+        root.path(),
+        "verify".into(),
+        RunConfig::default(),
+    )
+    .unwrap();
+    let (events, mut rx) = mpsc::unbounded_channel();
+    let (_tx, input) = mpsc::unbounded_channel();
+    let result = Engine {
+        workspace: workspace_for(&session).unwrap(),
+        store,
+        session,
+        generator: Arc::new(CorrectingGenerator(AtomicUsize::new(0))),
+        cancel: CancellationToken::new(),
+        events,
+        input,
+        interactive: false,
+        approved: None,
+    }
+    .run()
+    .await
+    .unwrap();
+    assert_eq!(result.status, RunStatus::AwaitingInput);
+    assert_eq!(result.metrics.tool_calls, 1); // Discovery only, never npm.
+    assert_eq!(result.metrics.simulated_turns, 2);
+    while let Some(event) = rx.recv().await {
+        assert_ne!(event.kind, "approval_required");
+    }
+}
+
+#[tokio::test]
 async fn explicit_auto_approve_completes_real_tools_without_approval_prompts() {
     let root = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();

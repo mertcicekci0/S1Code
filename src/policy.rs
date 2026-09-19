@@ -35,6 +35,7 @@ fn valid_unittest(args: &[&str]) -> bool {
         return true;
     }
     let mut at = usize::from(args.first() == Some(&"discover"));
+    let mut has_start_directory = false;
     if at == 0 && args.contains(&"discover") {
         return false;
     }
@@ -43,7 +44,8 @@ fn valid_unittest(args: &[&str]) -> bool {
             "-v" | "-q" => at += 1,
             "-s" if args.first() == Some(&"discover") && at + 1 < args.len() => {
                 let path = Path::new(args[at + 1]);
-                if args[at + 1].is_empty()
+                if has_start_directory
+                    || args[at + 1].is_empty()
                     || path.components().count() > 16
                     || !path.components().all(|component| match component {
                         Component::Normal(name) => !name.to_string_lossy().starts_with('.'),
@@ -52,6 +54,7 @@ fn valid_unittest(args: &[&str]) -> bool {
                 {
                     return false;
                 }
+                has_start_directory = true;
                 at += 2;
             }
             _ => return false,
@@ -148,6 +151,9 @@ mod tests {
             vec!["python3", "-m", "unittest", "discover", "-s"],
             vec!["python3", "-m", "unittest", "-s", "tests"],
             vec!["python3", "-m", "unittest", "discover", "--locals"],
+            vec![
+                "python3", "-m", "unittest", "discover", "-s", "tests", "-s", "other",
+            ],
         ] {
             assert!(!valid_command(
                 &argv.into_iter().map(String::from).collect::<Vec<_>>()

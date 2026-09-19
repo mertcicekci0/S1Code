@@ -597,6 +597,7 @@ impl Engine {
                         }
                     }
                     Action::Patch { edits } => self.workspace.validate_edits(edits).map(|_| ()),
+                    Action::Run { argv, .. } => self.workspace.validate_command(argv),
                     Action::Rehydrate { artifact } => {
                         if self
                             .session
@@ -868,6 +869,9 @@ impl Engine {
     }
     async fn approve(&mut self, c: &CandidateAction) -> Result<bool> {
         policy::revalidate(c, &self.workspace.revision()?)?;
+        if let Action::Run { argv, .. } = &c.action {
+            self.workspace.validate_command(argv)?;
+        }
         ensure!(!self.cancel.is_cancelled(), "cancelled before approval");
         if c.class == PolicyClass::Deny {
             bail!("policy denied action")

@@ -106,6 +106,9 @@ impl Workspace {
         Ok(at)
     }
     fn ignored(&self, path: &str) -> Result<bool> {
+        self.ignored_path(path, false)
+    }
+    fn ignored_path(&self, path: &str, is_dir: bool) -> Result<bool> {
         let mut builder = ignore::gitignore::GitignoreBuilder::new(&self.root);
         let mut dir = Some(
             self.root
@@ -134,8 +137,29 @@ impl Workspace {
         }
         Ok(builder
             .build()?
-            .matched_path_or_any_parents(self.root.join(path), false)
+            .matched_path_or_any_parents(self.root.join(path), is_dir)
             .is_ignore())
+    }
+    /// Validate explicit command inputs. Repository code itself is not sandboxed.
+    pub fn validate_command(&self, argv: &[String]) -> Result<()> {
+        ensure!(
+            crate::policy::valid_command(argv),
+            "unsupported command; use node --test, python3 -m unittest [-v|-q], python3 -m unittest discover [-s DIRECTORY] [-v|-q], or cargo test/check --offline [--locked] [--all-targets|--lib] [--quiet]; shell strings and additional flags are unsupported"
+        );
+        // The command grammar currently has one path argument: unittest -s.
+        if let Some(at) = argv.iter().position(|arg| arg == "-s") {
+            let relative = &argv[at + 1]; // Proven present by the command grammar.
+            let path = self.path(relative, true)?;
+            ensure!(
+                path.is_dir(),
+                "test start directory does not exist or is not a directory"
+            );
+            ensure!(
+                !self.ignored_path(relative, true)?,
+                "test start directory matches ignore rules"
+            );
+        }
+        Ok(())
     }
     pub fn files(&self) -> Result<Vec<String>> {
         let mut out = vec![];
@@ -507,7 +531,7 @@ impl Workspace {
                 diff
             }
             Action::Run { argv, .. } => {
-                ensure!(crate::policy::valid_command(argv), "command denied");
+                self.validate_command(argv)?;
                 let r = process(&self.root, argv, cancel, Duration::from_secs(120)).await?;
                 exit = r.exit_code;
                 diagnostic = r.diagnostic;

@@ -6,6 +6,12 @@ and no cost, speed or task-quality superiority claim is established.
 
 ## Implemented
 
+- Command hardening: unittest discovery checks directory existence, exclusions,
+  ignore rules and symlinks before approval and again before spawning. Duplicate
+  start-directory flags are denied. Unsupported-command feedback reaches planning.
+  Policy version 5 invalidates earlier approvals. The 16 native integration tests
+  and two command-policy tests pass locally; no provider requests were used.
+
 - Independent Apache-2.0 Rust library and binary, centralized S1Code branding,
   Rust 1.94.0, Cargo.lock and backward-compatible versioned session storage.
 - Native loop: bounded discovery and literal evidence candidates, generator
