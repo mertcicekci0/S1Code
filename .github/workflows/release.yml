@@ -1,0 +1,84 @@
+name: release candidate binaries
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: macos-15
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: 1.94.0
+          components: rustfmt, clippy
+      - run: scripts/check.sh
+      - run: sh scripts/build_release.sh
+      - run: python3 scripts/binary_archive.py
+      - name: Install and execute the packaged binary in a disposable prefix
+        shell: bash
+        run: |
+          version=$(python3 -c 'import json,subprocess; print(json.loads(subprocess.check_output(["cargo","metadata","--locked","--no-deps","--format-version","1"]))["packages"][0]["version"])')
+          python3 scripts/install.py --version "$version" --archive "target/dist/s1code-$version-${{ matrix.target }}.tar.gz" --checksums "target/dist/${{ matrix.target }}.sha256" --prefix "$RUNNER_TEMP/installed"
+          "$RUNNER_TEMP/installed/bin/s1code" --version
+          S1CODE_TEST_BINARY="$RUNNER_TEMP/installed/bin/s1code" python3 scripts/headless_smoke.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: binary-${{ matrix.target }}
+          path: |
+            target/dist/*.tar.gz
+            target/dist/*.sha256
+          if-no-files-found: error
+          retention-days: 7
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: 1.94.0
+      - run: cargo install cargo-audit --locked --version 0.22.2
+      - run: scripts/audit.sh
+  draft:
+    needs: [build, audit]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: binary-*
+          merge-multiple: true
+          path: release-assets
+      - name: Create an unpublished prerelease for final review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml","rb"))["package"]["version"])')
+          cat release-assets/*.sha256 > release-assets/SHA256SUMS
+          (cd release-assets && sha256sum --check SHA256SUMS)
+          cp scripts/install.py release-assets/install.py
+          gh release create "v$version" release-assets/*.tar.gz release-assets/SHA256SUMS release-assets/install.py --draft --prerelease --target "$GITHUB_SHA" --title "S1Code $version — experimental preview" --notes-file docs/release-notes.md

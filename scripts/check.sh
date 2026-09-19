@@ -2,6 +2,7 @@
 set -eu
 python3 scripts/test_try_live.py
 python3 scripts/test_snake_compare.py
+python3 scripts/test_install.py
 python3 scripts/release_check.py
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings

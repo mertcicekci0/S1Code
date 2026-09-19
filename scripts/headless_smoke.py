@@ -6,7 +6,7 @@ import pathlib
 import subprocess
 import tempfile
 
-binary = pathlib.Path("target/debug/s1code").resolve()
+binary = pathlib.Path(os.environ.get("S1CODE_TEST_BINARY", "target/debug/s1code")).resolve()
 with tempfile.TemporaryDirectory(prefix="s1code-headless-") as directory:
     base = pathlib.Path(directory)
     home, workspace = base / "data", base / "repo"
