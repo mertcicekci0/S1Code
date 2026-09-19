@@ -1,5 +1,6 @@
 use crate::{brand, domain::*, session::hash};
 use anyhow::{Result, ensure};
+use std::path::{Component, Path};
 
 pub fn classify(action: &Action) -> PolicyClass {
     match action {
@@ -23,12 +24,40 @@ pub fn valid_command(argv: &[String]) -> bool {
                     ["--offline", "--locked", "--all-targets", "--lib", "--quiet"].contains(a)
                 })
         }
-        ["python3", "-m", "unittest", rest @ ..] => {
-            rest.iter().all(|a| ["discover", "-v", "-q"].contains(a))
-        }
+        ["python3", "-m", "unittest", rest @ ..] => valid_unittest(rest),
         ["node", "--test"] => true,
         _ => false,
     }
+}
+
+fn valid_unittest(args: &[&str]) -> bool {
+    if args.is_empty() {
+        return true;
+    }
+    let mut at = usize::from(args.first() == Some(&"discover"));
+    if at == 0 && args.contains(&"discover") {
+        return false;
+    }
+    while at < args.len() {
+        match args[at] {
+            "-v" | "-q" => at += 1,
+            "-s" if args.first() == Some(&"discover") && at + 1 < args.len() => {
+                let path = Path::new(args[at + 1]);
+                if args[at + 1].is_empty()
+                    || path.components().count() > 16
+                    || !path.components().all(|component| match component {
+                        Component::Normal(name) => !name.to_string_lossy().starts_with('.'),
+                        _ => false,
+                    })
+                {
+                    return false;
+                }
+                at += 2;
+            }
+            _ => return false,
+        }
+    }
+    true
 }
 
 pub fn candidate(
@@ -99,6 +128,30 @@ mod tests {
                 }),
                 PolicyClass::Deny
             );
+        }
+    }
+
+    #[test]
+    fn unittest_discovery_allows_a_bounded_start_directory_only() {
+        assert!(valid_command(&[
+            "python3".into(),
+            "-m".into(),
+            "unittest".into(),
+            "discover".into(),
+            "-s".into(),
+            "tests".into(),
+            "-v".into(),
+        ]));
+        for argv in [
+            vec!["python3", "-m", "unittest", "discover", "-s", "../tests"],
+            vec!["python3", "-m", "unittest", "discover", "-s", "/tmp/tests"],
+            vec!["python3", "-m", "unittest", "discover", "-s"],
+            vec!["python3", "-m", "unittest", "-s", "tests"],
+            vec!["python3", "-m", "unittest", "discover", "--locals"],
+        ] {
+            assert!(!valid_command(
+                &argv.into_iter().map(String::from).collect::<Vec<_>>()
+            ));
         }
     }
 }

@@ -25,7 +25,7 @@ and no cost, speed or task-quality superiority claim is established.
   gateway; version checks, question batching, exact cache, conservative token
   estimates, bounded retries and experimental confidence/retention policies.
 - Bounded reads/search, git status/diff, hash-bound whole-file patches with recovery,
-  approved Python unittest, Node.js tests and offline Cargo checks, writer lock, process-group
+  approved Python unittest (including bounded `discover -s <relative-dir>`), Node.js tests and offline Cargo checks, writer lock, process-group
   cancellation, path/symlink/ignored-file protection and explicit exclusions.
 - Append-only events, atomic checkpoints, content-addressed artifacts, canonical
   call/result linkage, dependency closure, reversible eviction and exact rehydration.
@@ -51,7 +51,7 @@ and no cost, speed or task-quality superiority claim is established.
 
 ## Verification recorded locally
 
-- 85 offline Rust tests and 12 Python launcher/comparison tests passed. Coverage includes
+- 86 offline Rust tests and 12 Python launcher/comparison tests passed. Coverage includes
   fragmented streams, invalid decisions, retries, stale candidates, policy bypass,
   traversal/symlinks, concurrent edits, patch recovery, pinned overflow, exact
   rehydration, dependency closure, cancellation, restart, duplicate bridge requests,
