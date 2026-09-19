@@ -19,7 +19,7 @@ use std::{io, path::PathBuf};
 
 const ACCENT: Color = Color::Rgb(111, 211, 194);
 const MUTED: Color = Color::Rgb(151, 163, 177);
-pub const HELP: &str = "/provider codex|openai|claude  /model MODEL  /effort LEVEL  /output-limit TOKENS  /decision rules|jev|generative\n/jev openrouter|typesafe  /eviction jev|conservative|off  /workspace PATH  /permissions manual|full-access  /login  /account  /sessions\n/resume ID  /continue ID (Codex)  /demo  /claude-code  /help  /exit\nNative keys: OPENAI_API_KEY or ANTHROPIC_API_KEY; Jev: OPENROUTER_API_KEY or TYPESAFE_API_KEY. Set keys in the environment, never in this prompt.";
+pub const HELP: &str = "/provider codex|openai|claude  /model opus|sonnet|MODEL_ID  /effort LEVEL  /output-limit TOKENS  /decision rules|jev|generative\n/jev openrouter|typesafe  /eviction jev|conservative|off  /workspace PATH  /permissions manual|full-access  /login  /account  /sessions\n/resume ID  /continue ID (Codex)  /demo  /claude-code  /help  /exit\nNative keys: OPENAI_API_KEY or ANTHROPIC_API_KEY; Jev: OPENROUTER_API_KEY or TYPESAFE_API_KEY. Set keys in the environment, never in this prompt.";
 
 #[derive(Clone)]
 pub struct Settings {
@@ -209,15 +209,21 @@ pub fn interpret(line: &str, settings: &mut Settings) -> Result<Option<Command>>
             settings.effort = None;
         }
         "/model" => {
+            let model = match (settings.provider.as_str(), args) {
+                ("claude", "opus") => "claude-opus-5",
+                ("claude", "sonnet") => "claude-sonnet-5",
+                _ => args,
+            };
             ensure!(
-                !args.is_empty()
-                    && args.len() <= 200
-                    && !args.contains(char::is_whitespace)
-                    && !args.starts_with("sk-")
-                    && !args.starts_with("apikey_"),
-                "Use /model MODEL_ID"
+                !model.is_empty()
+                    && model.len() <= 200
+                    && !model.contains(char::is_whitespace)
+                    && !model.starts_with("sk-")
+                    && !model.starts_with("apikey_")
+                    && !model.ends_with('-'),
+                "Use /model opus, /model sonnet, or a complete MODEL_ID"
             );
-            settings.model = Some(args.into());
+            settings.model = Some(model.into());
         }
         "/decision" | "/jev" => {
             ensure!(
@@ -603,6 +609,17 @@ mod tests {
         assert!(!restored.auto_approve);
         settings.next_provider();
         assert!(!settings.auto_approve && settings.effort.is_none());
+    }
+    #[test]
+    fn claude_model_aliases_expand_and_incomplete_ids_fail_before_network_use() {
+        let mut settings = Settings::default();
+        interpret("/provider claude", &mut settings).unwrap();
+        interpret("/model opus", &mut settings).unwrap();
+        assert_eq!(settings.model.as_deref(), Some("claude-opus-5"));
+        interpret("/model sonnet", &mut settings).unwrap();
+        assert_eq!(settings.model.as_deref(), Some("claude-sonnet-5"));
+        assert!(interpret("/model claude-opus-", &mut settings).is_err());
+        assert_eq!(settings.model.as_deref(), Some("claude-sonnet-5"));
     }
     #[test]
     fn home_auto_approval_is_explicit_native_and_reset_on_provider_change() {

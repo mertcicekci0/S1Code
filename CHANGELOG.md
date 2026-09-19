@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0-rc.4 — Safer model selection
+
+- Claude model shortcuts `/model opus` and `/model sonnet` expand to the complete
+  configured model IDs.
+- Incomplete model IDs ending in `-` fail locally before a paid provider request.
+
 ## 0.3.0-rc.3 — Conversational replies and stream recovery
 
 - Exact greetings return to the composer without repository tools or provider calls.

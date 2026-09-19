@@ -212,3 +212,9 @@ cap and no tools. Recovery fixtures exercise transient exhaustion, permanent
 failure, cancellation and retry-budget exhaustion after actual patch/test execution.
 No new live provider inference was used; old generic stream errors cannot reveal
 provider details that were never persisted.
+
+## rc.4 model selection guard
+
+The task-entry screen accepts `/model opus` and `/model sonnet` as complete Claude
+model aliases. A model ID ending in `-` is rejected locally, preventing the known
+mistyped `claude-opus-` value from consuming a failed provider request.
