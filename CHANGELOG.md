@@ -13,7 +13,8 @@
   dependencies before creating a draft prerelease. Third-party CI actions are pinned
   to commits. Publication remains a separate final step.
 - Installer tests cover tampering, unsafe archives, missing notices, wrong platform,
-  linked destinations and failed replacement without losing the existing binary.
+  linked destinations, bounded gzip expansion, malformed manifests and failed
+  replacement without losing the existing binary.
 
 ## 0.3.0-rc.7
 

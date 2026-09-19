@@ -54,10 +54,11 @@ signature or protection against a compromised publisher. macOS binaries are not
 Developer ID signed or notarized; if macOS blocks execution, use the source build
 instead of globally weakening Gatekeeper. No automatic updater runs.
 
-On macOS, a newly built or replaced unsigned binary can trigger a Keychain access
-prompt for an existing saved key. Allow the official local binary when macOS asks;
-you should not need to paste the key again. A timeout sends no provider request.
-S1Code does not weaken Keychain access controls to avoid this OS prompt.
+macOS may request access to an existing saved key. Key entry uses the native
+Security framework; lookup uses the system security utility, so their permissions
+can differ. Review and allow the expected Keychain access request; you should not
+need to paste the key again. A timeout sends no provider request. S1Code does not
+weaken Keychain access controls to avoid this OS prompt.
 
 For an offline installation, download the target `.tar.gz` and `SHA256SUMS` assets
 on another machine, then use:

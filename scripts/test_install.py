@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline release installer invariants. Never execute a downloaded payload."""
 import hashlib
+import gzip
 import io
 import json
 from pathlib import Path
@@ -83,6 +84,17 @@ class Installation(unittest.TestCase):
             install.validate(*fixture(), VERSION, HOST)
         with patch.object(install.platform, "system", return_value="Windows"), self.assertRaises(ValueError):
             install.target()
+
+    def test_decompression_is_bounded_before_parsing_tar_headers(self):
+        data = gzip.compress(b"a" * 20_000)
+        sums = f"{hashlib.sha256(data).hexdigest()}  s1code-{VERSION}-{HOST}.tar.gz\n".encode()
+        with patch.object(install, "MAX_CONTENT", 1024), self.assertRaisesRegex(ValueError, "Unpacked release"):
+            install.validate(data, sums, VERSION, HOST)
+
+    def test_malformed_manifest_types_fail_without_traceback(self):
+        for value in [None, 12, [], {}]:
+            with self.subTest(commit=value), self.assertRaises(ValueError):
+                install.validate(*fixture(manifest_update=dict(commit=value)), VERSION, HOST)
 
     def test_failure_keeps_existing_binary_and_cleans_staging(self):
         contents = install.validate(*fixture(), VERSION, HOST)

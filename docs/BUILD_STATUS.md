@@ -59,8 +59,9 @@ Cost, speed and task-quality advantages have not been established.
 
 ## Verification
 
-rc.8 local checks passed: 110 offline Rust tests, 19 Python tests, formatting,
-all-target clippy, six headless/PTY/credential/MCP smoke scripts, release build, six evaluator fixtures and the 15-trial context probe. The
+rc.8 local checks passed: 110 offline Rust tests, 21 Python tests, formatting,
+all-target clippy, six headless/PTY/credential/MCP smoke scripts, release build,
+six evaluator fixtures and the 15-trial context probe. The
 advisory audit reported no findings. actionlint 1.7.12 accepted both workflows
 (shellcheck and pyflakes integrations disabled). Binary release preparation adds
 two native target builds, installed-archive smoke checks and checksum/manifest

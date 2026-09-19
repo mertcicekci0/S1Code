@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Install an explicitly selected S1Code release; Python 3.10+, no dependencies."""
 import argparse
+import gzip
 import hashlib
 import io
 import json
@@ -52,6 +53,8 @@ def read_file(path, limit):
 
 
 def validate(archive, checksums, version, host):
+    if len(archive) > MAX_ARCHIVE:
+        raise ValueError("Release file exceeds size limit")
     filename = f"s1code-{version}-{host}.tar.gz"
     matching = [line.split() for line in checksums.decode("ascii").splitlines()
                 if len(line.split()) == 2 and line.split()[1] == filename]
@@ -61,8 +64,14 @@ def validate(archive, checksums, version, host):
         raise ValueError("Release checksum mismatch; nothing installed")
     contents = {}
     size = 0
+    # Bound decompression before tar parses extended headers or allocates their
+    # contents. A member-size check alone cannot contain a gzip/PAX header bomb.
+    with gzip.GzipFile(fileobj=io.BytesIO(archive), mode="rb") as compressed:
+        unpacked = compressed.read(MAX_CONTENT + 1)
+    if len(unpacked) > MAX_CONTENT:
+        raise ValueError("Unpacked release exceeds size limit")
     # Read only the exact regular files we ship. No extractall, paths, links or devices.
-    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as bundle:
+    with tarfile.open(fileobj=io.BytesIO(unpacked), mode="r:") as bundle:
         for member in bundle:
             if member.name not in FILES or member.name in contents or not member.isfile():
                 raise ValueError("Unexpected archive entry; nothing installed")
@@ -76,7 +85,8 @@ def validate(archive, checksums, version, host):
         raise ValueError("Release is missing required binary or license files")
     manifest = json.loads(contents["manifest.json"])
     if (not isinstance(manifest, dict) or manifest.get("version") != version or manifest.get("target") != host
-            or not re.fullmatch(r"[0-9a-f]{40}", manifest.get("commit", ""))
+            or not isinstance(manifest.get("commit"), str)
+            or not re.fullmatch(r"[0-9a-f]{40}", manifest["commit"])
             or manifest.get("binary_sha256") != hashlib.sha256(contents["s1code"]).hexdigest()):
         raise ValueError("Release manifest does not match requested version, platform or binary")
     if not contents["s1code"] or not contents["LICENSE"] or not contents["THIRD_PARTY_LICENSES.txt"]:
@@ -144,5 +154,5 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (OSError, ValueError, tarfile.TarError) as error:
+    except (OSError, ValueError, EOFError, tarfile.TarError) as error:
         sys.exit(f"S1Code installation failed: {error}")
