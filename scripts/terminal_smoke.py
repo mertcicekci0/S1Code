@@ -7,7 +7,7 @@ master,slave=pty.openpty()
 fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,50,0,0))
 env=dict(os.environ);env['TERM']='xterm-256color'
 process=subprocess.Popen([str(binary),'--home',str(home),'demo','--offline','--workspace',str(root)],stdin=slave,stdout=slave,stderr=slave,env=env,start_new_session=True)
-os.close(slave);deadline=time.monotonic()+25;approved=set();output=bytearray();resized=False;done=False;next_close=0
+os.close(slave);deadline=time.monotonic()+25;approved=set();output=bytearray();resized=False;done=False;next_close=0;approval_attempts={}
 try:
  while process.poll() is None and time.monotonic()<deadline:
   if select.select([master],[],[],0.05)[0]:
@@ -18,9 +18,11 @@ try:
    try:session=json.loads(checkpoints[0].read_text())
    except (OSError,json.JSONDecodeError):continue
    pending=session.get('pending')
-   if pending and pending['id'] not in approved:
-    # Allow the UI to consume the event before sending its approval key.
-    time.sleep(0.12);os.write(master,b'y');approved.add(pending['id'])
+   if pending and time.monotonic() >= approval_attempts.get(pending['id'], 0):
+    # Checkpoint persistence can precede the UI event on a busy runner. All
+    # three disposable fixture actions are authorized; retry until acknowledged.
+    os.write(master,b'y');approved.add(pending['id'])
+    approval_attempts[pending['id']] = time.monotonic() + 0.5
    if not resized and len(approved)>=1:
     fcntl.ioctl(master,termios.TIOCSWINSZ,struct.pack('HHHH',32,110,0,0));os.kill(process.pid,signal.SIGWINCH);os.write(master,b'2341');resized=True
    # The durable checkpoint can precede the last frame. Retry closing after
@@ -29,6 +31,9 @@ try:
     os.write(master,b'q');done=True;next_close=time.monotonic()+0.25
  process.wait(timeout=3)
  assert process.returncode==0 and done and len(approved)==3
+ journal=[json.loads(line) for line in (checkpoints[0].parent/'events.jsonl').read_text().splitlines()]
+ acknowledged=[e['data']['candidate'] for e in journal if e['kind']=='approved']
+ assert len(acknowledged)==3 and set(acknowledged)==approved
  assert b'OFFLINE SIMULATION' in output and b'\x1b[?1049l' in output
  assert b'python3 -m unittest -v' in output and b'Approve once' in output
  assert b'"policy_version"' not in output and b'"candidate"' not in output

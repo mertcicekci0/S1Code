@@ -77,6 +77,7 @@ with tempfile.TemporaryDirectory(prefix='s1code-home-') as directory:
         pump(0.1)
         send('/demo\r')
         approved=set()
+        approval_attempts={}
         deadline=time.monotonic()+25
         completed=None
         while time.monotonic()<deadline:
@@ -86,14 +87,17 @@ with tempfile.TemporaryDirectory(prefix='s1code-home-') as directory:
             try: session=json.loads(paths[0].read_text())
             except (OSError,json.JSONDecodeError): continue
             pending=session.get('pending')
-            if pending and pending['id'] not in approved:
-                pump(0.15)
+            if pending and time.monotonic() >= approval_attempts.get(pending['id'], 0):
                 send('y')
                 approved.add(pending['id'])
+                approval_attempts[pending['id']] = time.monotonic() + 0.5
             if session['status']=='completed':
                 completed=session
                 break
         assert completed and len(approved)==3
+        journal=[json.loads(line) for line in (paths[0].parent/'events.jsonl').read_text().splitlines()]
+        acknowledged=[e['data']['candidate'] for e in journal if e['kind']=='approved']
+        assert len(acknowledged)==3 and set(acknowledged)==approved
         pump(0.3)
         mark=send('q')
         deadline=time.monotonic()+5
