@@ -70,3 +70,11 @@ Native Claude requests use the provider's documented five-minute ephemeral promp
 cache for stable task/evidence prefixes. Cache retention is provider-side and
 separate from local artifacts and session deletion. Cache writes/reads are recorded
 when returned. This is not a zero-retention promise.
+
+## Optional MCP evidence companion
+
+`mcp` reads only requests supplied on stdin. Calling `rank_evidence` sends the
+task and supplied excerpts to TypeSafe; discovery and budget queries stay local.
+It writes no transcripts or evidence to disk. The host may retain tool inputs and
+results in its own history. Loaded-secret and common-prefix checks are best effort,
+not complete data-loss prevention. No Claude account token is read by this server.

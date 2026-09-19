@@ -108,6 +108,19 @@ Native OpenAI generation is also available through the Responses API using an
 OpenAI API key. `/claude-code` hands the terminal to the installed official Claude
 Code application; that handoff does not run S1Code's native loop or Jev decisions.
 
+### Claude account + optional Jev companion
+
+```sh
+s1code login claude
+s1code account claude
+s1code claude-code
+```
+
+Login stays inside the official Claude Code client. To make Jev evidence ranking
+available there, connect the optional [MCP companion](docs/claude-companion.md).
+Claude Code retains its tool loop and context; Jev uses a separate TypeSafe key.
+Native S1Code still uses API-key generation.
+
 ## In the terminal
 
 | Action | Command or key |

@@ -117,3 +117,21 @@ Reviewed HTTP 429/5xx, mid-stream `error`, `error.type`, `error.message`,
 `request_id`/`request-id`, cumulative usage and retry guidance. The engine owns
 bounded retries; the adapter still performs exactly one HTTP request per call.
 No third-party implementation copied.
+
+## Managed host / companion review (2026-09-19)
+
+- fast-jev-compaction pinned reference commit
+  `e3f262a7f4d42bd8dd32ced30d26176f7cb545b0`: inspected `hooks/fast-jev.ts`,
+  `hooks/hooks.json`, `src/state.ts`, `src/request.ts`, `src/compact.ts` and README.
+  State fitting omits result bodies from decision state, call/result IDs are grouped,
+  independent question batches repeat the fitted snapshot, and the hook falls back
+  to built-in compaction on failure or insufficient reduction. The visual demo is
+  explicitly scripted. No source reused.
+- Official Claude Code `auth --help`, `auth login --help`, `auth status --help`,
+  `mcp add --help`, version 2.1.278; no token files consulted.
+- Official [authentication rules](https://code.claude.com/docs/en/legal-and-compliance),
+  [MCP setup](https://code.claude.com/docs/en/mcp) and
+  [hooks](https://code.claude.com/docs/en/hooks).
+- MCP 2025-06-18 [stdio transport](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
+  and [tools](https://modelcontextprotocol.io/specification/2025-06-18/server/tools).
+  Independent JSON-RPC implementation; no SDK or reference source copied.

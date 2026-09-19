@@ -19,3 +19,5 @@ pub mod ui;
 pub mod evaluation;
 
 pub mod credentials;
+
+pub mod companion;

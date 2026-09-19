@@ -19,7 +19,7 @@ use std::{io, path::PathBuf};
 
 const ACCENT: Color = Color::Rgb(111, 211, 194);
 const MUTED: Color = Color::Rgb(151, 163, 177);
-pub const HELP: &str = "/provider codex|openai|claude  /model opus|sonnet|MODEL_ID  /effort LEVEL  /output-limit TOKENS  /decision rules|jev|generative\n/jev openrouter|typesafe  /eviction jev|conservative|off  /workspace PATH  /permissions manual|full-access  /login  /account  /auth PROVIDER (macOS)  /sessions\n/resume [latest|ID|PREFIX]  /continue ID (Codex)  /demo  /claude-code  /help  /exit\nNative keys: OPENAI_API_KEY or ANTHROPIC_API_KEY; Jev: OPENROUTER_API_KEY or TYPESAFE_API_KEY. Use /auth PROVIDER for a hidden Keychain prompt on macOS, or your environment. Never paste keys as chat text.";
+pub const HELP: &str = "/provider codex|openai|claude  /model opus|sonnet|MODEL_ID  /effort LEVEL  /output-limit TOKENS  /decision rules|jev|generative\n/jev openrouter|typesafe  /eviction jev|conservative|off  /workspace PATH  /permissions manual|full-access  /login [codex|claude]  /account [codex|claude]  /auth PROVIDER (macOS)  /sessions\n/resume [latest|ID|PREFIX]  /continue ID (Codex)  /demo  /claude-code  /help  /exit\nNative keys: OPENAI_API_KEY or ANTHROPIC_API_KEY; Jev: OPENROUTER_API_KEY or TYPESAFE_API_KEY. Use /auth PROVIDER for a hidden Keychain prompt on macOS, or your environment. Never paste keys as chat text.";
 
 #[derive(Clone)]
 pub struct Settings {
@@ -197,8 +197,8 @@ fn key_present(name: &str) -> bool {
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Task(String),
-    Login,
-    Account,
+    Login(String),
+    Account(String),
     Auth(String),
     Sessions,
     Resume(String, bool),
@@ -318,8 +318,18 @@ pub fn interpret(line: &str, settings: &mut Settings) -> Result<Option<Command>>
             ensure!(path.is_dir(), "workspace must be a directory");
             settings.workspace = path;
         }
-        "/login" if args.is_empty() => return Ok(Some(Command::Login)),
-        "/account" if args.is_empty() => return Ok(Some(Command::Account)),
+        "/login" | "/account" => {
+            let provider = if args.is_empty() { "codex" } else { args };
+            ensure!(
+                matches!(provider, "codex" | "claude"),
+                "Use /login codex|claude or /account codex|claude"
+            );
+            return Ok(Some(if command == "/login" {
+                Command::Login(provider.into())
+            } else {
+                Command::Account(provider.into())
+            }));
+        }
         "/auth" => {
             crate::credentials::variable(args)?;
             return Ok(Some(Command::Auth(args.into())));
@@ -703,5 +713,23 @@ mod tests {
         editor.insert("\n/help\u{1b}");
         assert_eq!(editor.take(), "ş hatayı düzelt\n/help");
         assert_eq!(editor.cursor, 0);
+    }
+    #[test]
+    fn managed_login_is_explicit_and_does_not_change_native_provider() {
+        let mut settings = Settings::default();
+        assert_eq!(
+            interpret("/login claude", &mut settings).unwrap(),
+            Some(Command::Login("claude".into()))
+        );
+        assert_eq!(
+            interpret("/account claude", &mut settings).unwrap(),
+            Some(Command::Account("claude".into()))
+        );
+        assert_eq!(
+            interpret("/login", &mut settings).unwrap(),
+            Some(Command::Login("codex".into()))
+        );
+        assert_eq!(settings.provider, "codex");
+        assert!(interpret("/login unsupported", &mut settings).is_err());
     }
 }

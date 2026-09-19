@@ -140,21 +140,27 @@ enum Commands {
         jev_resolved_model: Option<String>,
     },
     Doctor,
+    /// Optional TypeSafe evidence ranking over MCP stdio; no generation or local tools.
+    Mcp {
+        /// Total billed request attempts per server process, including retries. Restart renews it.
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=64))]
+        max_provider_requests: u64,
+    },
     /// Open the unmodified official Claude Code UI. It owns auth, tools and history.
     ClaudeCode {
         #[arg(long, default_value = ".")]
         workspace: PathBuf,
     },
     Login {
-        #[arg(value_parser=["codex"])]
+        #[arg(value_parser=["codex", "claude"])]
         provider: String,
     },
     Logout {
-        #[arg(value_parser=["codex"])]
+        #[arg(value_parser=["codex", "claude"])]
         provider: String,
     },
     Account {
-        #[arg(value_parser=["codex"])]
+        #[arg(value_parser=["codex", "claude"])]
         provider: String,
     },
     Demo {
@@ -448,14 +454,24 @@ async fn execute(cmd: Commands, home: PathBuf) -> Result<()> {
                 serde_json::json!({"provider":provider,"operation":operation,"store":"macOS Keychain","inference_requests":0,"note":"Explicit environment keys take precedence. This command does not validate provider access or modify environment variables."})
             );
         }
-        Commands::Login { .. } => {
-            account_command("login").await?;
+        Commands::Login { provider } => {
+            managed_account(&provider, "login").await?;
         }
-        Commands::Logout { .. } => {
-            account_command("logout").await?;
+        Commands::Logout { provider } => {
+            managed_account(&provider, "logout").await?;
         }
-        Commands::Account { .. } => {
-            account_command("status").await?;
+        Commands::Account { provider } => {
+            managed_account(&provider, "status").await?;
+        }
+        Commands::Mcp {
+            max_provider_requests,
+        } => {
+            s1code::companion::serve(
+                tokio::io::BufReader::new(tokio::io::stdin()),
+                tokio::io::stdout(),
+                s1code::companion::Companion::new(max_provider_requests)?,
+            )
+            .await?;
         }
         Commands::Doctor => {
             s1code::session::private_dir(&home)?;
@@ -597,14 +613,19 @@ async fn interactive_home(home: PathBuf) -> Result<()> {
                 max_generations: None,
                 max_steps: None,
             },
-            Command::Login => Commands::Login {
-                provider: "codex".into(),
-            },
+            Command::Login(provider) => Commands::Login { provider },
             Command::Auth(provider) => Commands::Auth {
                 operation: "set".into(),
                 provider,
             },
-            Command::Account => {
+            Command::Account(provider) => {
+                if provider == "claude" {
+                    match s1code::external::claude_account_status().await {
+                        Ok(value) => messages.push(format!("S1Code: {value}")),
+                        Err(error) => messages.push(format!("S1Code: {error:#}")),
+                    }
+                    continue;
+                }
                 let cancel = CancellationToken::new();
                 match s1code::bridge::account("status", &cancel).await {
                     Ok(value) => messages.push(format!(
@@ -815,4 +836,17 @@ async fn drive_bridge(store: Store, s: Session, headless: bool, continue_task: b
         anyhow::bail!("delegated session {} failed", result.id)
     }
     Ok(())
+}
+
+async fn managed_account(provider: &str, operation: &str) -> Result<()> {
+    if provider == "claude" {
+        if operation == "status" {
+            println!("{}", s1code::external::claude_account_status().await?);
+            Ok(())
+        } else {
+            s1code::external::claude_auth(operation).await
+        }
+    } else {
+        account_command(operation).await
+    }
 }

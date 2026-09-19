@@ -78,7 +78,7 @@ s1code run "fix the parser and run tests" --provider claude \
 
 The Jev key is separate. A single billed Claude contract check requires explicit
 consent: `S1CODE_LIVE_BUDGET_REQUESTS=1 cargo test --test live claude_live_contract -- --ignored`.
-This check was not run during development; it executes no proposed local actions.
+This check executes no proposed local actions; live acceptance records remain private.
 
 ## Jev decisions
 
@@ -207,7 +207,15 @@ notes observed upstream verification evidence, not proof of task correctness.
 CLI protocol/account checks and local protocol fixtures are separate from billed
 inference checks. See BUILD_STATUS.md for the actual verification results.
 
-## Official Claude Code terminal handoff
+## Official Claude Code account and terminal handoff
+
+`s1code login claude`, `s1code account claude`, and `s1code logout claude` forward
+to the installed official CLI. Login uses its Claude-account flow, and status
+omits account identity. `/login claude` and `/account claude` also work at home.
+The optional [MCP companion](claude-companion.md) provides separately billed Jev
+evidence ranking inside a compatible host, including official Claude Code. This
+is advisory tool use, not replacement of the host's decisions or compaction.
+
 
 `s1code claude-code --workspace PATH` or `/claude-code` opens the installed official
 `claude` executable unchanged, interactively, with no task or permission-bypass flags.
@@ -219,7 +227,8 @@ inactive, and tools, approval settings, sandbox, telemetry, history and resumpti
 belong to Claude Code. Use Claude Code's own controls. No S1Code metrics are invented.
 Unrelated provider keys are removed from the child environment; an explicitly
 configured ANTHROPIC_API_KEY is available to the official client that needs it.
-The local `claude --version` reported 2.1.266; no billed Claude Code task was run.
+Account commands were checked against the installed Claude Code 2.1.278 CLI.
+Authentication itself must complete in the user's interactive official login flow.
 
 The current [Anthropic authentication rules](https://code.claude.com/docs/en/legal-and-compliance)
 distinguish end users signing into the unmodified official binary from third-party
@@ -244,8 +253,8 @@ then reuses saved macOS Keychain credentials or reads missing keys without echo.
 On macOS, newly entered keys are saved under `s1code.credentials.v1` for the next run.
 Keys are never sent to Cargo/build scripts or stored in session files. A request cap is not a dollar cap. Set provider credit
 limits separately. Task sessions remain in the printed private temporary directory;
-keep Jev measurements private. These commands were prepared and tested offline;
-live provider validation remains unverified until you run them successfully.
+keep Jev measurements private. Offline tests cover these commands; live acceptance records remain private and
+do not establish access for a different account.
 
 The launcher now defaults to direct TypeSafe access (`TYPESAFE_API_KEY`). Use
 `python3 scripts/try_live.py jev-check` to test only Jev with one authorized request,
