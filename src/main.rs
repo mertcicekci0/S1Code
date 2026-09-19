@@ -51,7 +51,7 @@ struct RunArgs {
     jev_resolved_model: Option<String>,
     #[arg(long, default_value_t = 40)]
     max_steps: usize,
-    #[arg(long, default_value_t = 12)]
+    #[arg(long, default_value_t = 24)]
     max_generations: u64,
     #[arg(long, default_value_t = 24)]
     max_provider_requests: u64,
@@ -505,7 +505,7 @@ fn home_run(task: String, settings: &s1code::home::Settings) -> RunArgs {
         .into(),
         jev_resolved_model: None,
         max_steps: 40,
-        max_generations: 12,
+        max_generations: 24,
         max_provider_requests: 24,
         context_bytes: 96_000,
         exclude: vec![],

@@ -4,14 +4,14 @@
 
 OpenAI Responses HTTP endpoint: `https://api.openai.com/v1/responses`, API-key
 Bearer authentication. `OPENAI_API_KEY` is read only by the generation adapter.
-Requests use `stream: true`, `store: false`, a strict JSON schema, and at most 8192
-output tokens. Model IDs are configurable. Local mock-server tests cover fragmented
+Requests use `stream: true`, `store: false`, a strict JSON schema, and a configurable
+output limit (16384 tokens by default). Model IDs are configurable. Local mock-server tests cover fragmented
 UTF-8/SSE, structured proposals, usage and terminal validation. No billed Responses
 call was made during this build; model/account availability is unverified.
 
 The contract is `{"message":"visible plan","actions":[...]}` with 1–4 alternative
 next actions, not a queued program. Actions are tagged `list`, `search`, `read`,
-`patch`, `run`, `git`, `rehydrate`, `ask_generator`, `finish`, or `blocked`. See
+`patch`, `replace`, `run`, `git`, `rehydrate`, `ask_generator`, `finish`, or `blocked`. See
 `generation::proposal_schema` and `domain::Action` for exact arguments. Native
 providers never execute tools. No hidden reasoning is requested or displayed.
 Failures never trigger an implicit provider change or a Codex delegation.
@@ -20,15 +20,16 @@ Failures never trigger an implicit provider change or a Codex delegation.
 
 Choose `--provider claude` (or `/provider claude` on the home screen) and set
 `ANTHROPIC_API_KEY`. S1Code calls `POST https://api.anthropic.com/v1/messages` with
-`x-api-key`, `anthropic-version: 2023-06-01`, `stream: true`, and
-`output_config.format` JSON schema. The provider returns the same bounded proposal
-contract as OpenAI; it executes no tools. There is no hidden Claude Code runtime
+`x-api-key`, `anthropic-version: 2023-06-01`, `stream: true`, and official
+client tool definitions. Streamed `tool_use` arguments become validated internal
+actions only after successful completion. The provider executes no tools. There is no hidden Claude Code runtime
 in this mode. Jev works with either native generation provider.
 
 The configurable default is `claude-opus-5`, listed in the official model docs
-reviewed on 2026-09-19. Account availability and billed inference are unverified.
+reviewed on 2026-09-19. Availability depends on the account. Private live acceptance records are not
+published with this source release.
 The adapter checks message/block ordering, fragmented UTF-8/SSE, final stop reason,
-structured proposals, bounded output and cancellation. Refusal, truncated output,
+typed tool proposals, bounded output and cancellation. Refusal, truncated output,
 HTTP/stream errors, unexpected tools and incomplete streams cannot create actions.
 Thinking content is never shown or stored. Failures do not switch providers.
 

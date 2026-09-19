@@ -1,5 +1,8 @@
 # Claude action wire format
 
+Historical decision: outgoing Claude requests now use client tools, superseded by
+[Native client tools](007-native-client-tools.md). Legacy decoding remains tested.
+
 The Claude adapter sends a single action object with an explicit type enum and
 separate nullable argument objects named read, search, patch, run, rehydrate,
 blocked and finish. Only the payload matching type may be non-null. No-argument

@@ -44,7 +44,7 @@ and no cost, speed or task-quality superiority claim is established.
 
 ## Verification recorded locally
 
-- 57 offline Rust tests and 12 Python launcher/comparison tests passed. Coverage includes
+- 64 offline Rust tests and 12 Python launcher/comparison tests passed. Coverage includes
   fragmented streams, invalid decisions, retries, stale candidates, policy bypass,
   traversal/symlinks, concurrent edits, patch recovery, pinned overflow, exact
   rehydration, dependency closure, cancellation, restart, duplicate bridge requests,
@@ -144,8 +144,8 @@ refusals and incomplete transport streams do not retry. Partial actions never ru
 Long tasks are folded in conversation while exact text remains in Activity;
 paste preserves newlines, tool progress/recovery are readable and empty assistant
 sections are hidden. The previously failed live Snake trace did not retain its stop
-reason, so its root cause cannot be established retrospectively. A successful live
-Snake build remains unverified; offline recovery tests are not a live success claim.
+reason, so its root cause cannot be established retrospectively. At that milestone live coding acceptance was still pending. Subsequent private
+acceptance records are retained outside the published source.
 
 Native execution milestone: Claude client-tool proposals replace the nullable
 text-output envelope on outgoing requests. Fragmented tool JSON is collected and
@@ -155,7 +155,7 @@ default. Reported reasoning usage is recorded as a subset of output. Empty works
 searches are skipped, and rejected candidate diagnostics reach subsequent planning.
 Provider integration tests (17), library tests (17) and all-target clippy passed.
 The local HTTP fixture performs a real patch and verification with streamed tool
-calls. This is not a successful live Snake run; live acceptance remains outstanding.
+calls. These protocol tests are offline; they must not be reported as live model results.
 
 Exact replacement proposals now materialize into a complete, hash-bound patch before
 selection. Ambiguous, missing, unchanged, overlapping and stale snippets fail without
@@ -163,3 +163,12 @@ mutation; approvals and rollback use the existing full-patch path. Interactive h
 remembers provider/model/decision preferences (not workspace, credentials or consent),
 preserves multiline input, and resets auto-approval on either provider-switch route.
 Keychain presence is cached for rendering and permission waits have a 15-second bound.
+
+Final native hardening: context views now replace full patch payloads with file/hash
+metadata, so eviction cannot accidentally retain a second copy of code in action
+arguments. Canonical actions and exact artifact bytes remain recoverable. A
+regression covers this boundary. The default generation sub-budget is 24 while the
+combined provider request cap remains 24; this avoids premature generation-only
+stops without increasing the total request cap. All 64 Rust and 12 Python checks,
+formatting, clippy, release build and publication scan passed locally. Private live
+acceptance was performed; provider-restricted records are not included in Git.

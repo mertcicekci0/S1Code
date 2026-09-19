@@ -96,3 +96,40 @@ proptest::proptest! {
         }
     }
 }
+
+#[test]
+fn evicted_patch_does_not_survive_inside_action_arguments() {
+    let (_root, _home, store, mut s) = fixture(5, &"patch result bytes\n".repeat(400));
+    let source = "unique-full-file-code".repeat(1000);
+    s.context[0].action = Action::Patch {
+        edits: vec![Edit {
+            path: "game.js".into(),
+            before_hash: None,
+            content: source.clone(),
+        }],
+    };
+    let artifact = s.context[0].artifact.clone();
+    let exact = store.get(&artifact.hash).unwrap();
+    let rendered = context::render(&s, &store).unwrap();
+    assert!(!rendered.to_string().contains("unique-full-file-code"));
+    assert_eq!(
+        rendered["evidence"][0]["action"]["files"][0]["after_hash"],
+        s1code::session::hash(source.as_bytes())
+    );
+    let excerpts = context::excerpts(&s, &store, &[0]).unwrap();
+    assert!(!excerpts.to_string().contains("unique-full-file-code"));
+    s.config.context_bytes = 20_000;
+    let evicted = context::compact(&mut s, &store, None).unwrap();
+    assert!(evicted.contains(&artifact.hash));
+    assert_eq!(store.get(&artifact.hash).unwrap(), exact);
+    assert_eq!(
+        s.context[0].action,
+        Action::Patch {
+            edits: vec![Edit {
+                path: "game.js".into(),
+                before_hash: None,
+                content: source
+            }]
+        }
+    );
+}

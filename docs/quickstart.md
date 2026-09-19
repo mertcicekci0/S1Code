@@ -30,7 +30,7 @@ For a real task, set `OPENAI_API_KEY` outside the repository, open the target
 repository, and run `s1code run "your bounded task"`. The default policy is rules.
 `--decision jev` also needs `TYPESAFE_API_KEY`. `--decision generative` uses the same
 Responses model for constrained action selection and counts those generation calls.
-Each mode defaults to 40 steps, 12 generation calls, and 24 total provider requests.
+Each mode defaults to 40 steps, up to 24 generation calls, and 24 total provider requests.
 These are request caps, not dollar caps. Provider pricing/usage can vary.
 
 If your Jev key is from OpenRouter, use `OPENROUTER_API_KEY` and

@@ -2,6 +2,13 @@
 
 ## Unreleased — Native usability and recovery
 
+- Claude uses streamed client-tool proposals with explicit output and effort budgets.
+  A single concrete next action avoids unnecessary alternative implementations.
+- Exact snippet replacements become validated, reviewable full patches before execution.
+- Provider/model preferences persist; multiline input wraps and Keychain waits are bounded.
+- Evicted patches no longer leak duplicate source through action arguments; canonical
+  artifacts remain intact and exactly rehydratable.
+
 - Distinct Claude stop reasons, bounded smaller-action recovery after output
   truncation, and preserved failure usage. No partial action is executed.
 - Compact task display, preserved pasted newlines and visible tool/recovery activity.

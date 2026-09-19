@@ -202,7 +202,7 @@ impl Default for RunConfig {
             jev_provider: default_jev_provider(),
             jev_resolved_model: None,
             max_steps: 40,
-            max_generations: 12,
+            max_generations: 24,
             max_provider_requests: 24,
             context_bytes: 96_000,
             exclusions: vec![],
